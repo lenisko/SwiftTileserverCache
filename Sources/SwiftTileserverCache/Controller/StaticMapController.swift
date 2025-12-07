@@ -118,7 +118,14 @@ internal class StaticMapController {
                     return request.eventLoop.makeFailedFuture(Abort(.notFound, reason: "No regeneratable found with this id"))
                 }
                 return ResponseUtils.readRegeneratable(request: request, path: regeneratablePath, as: StaticMap.self).flatMap { staticMap in
-                    return self.generateStaticMapAndResponse(request: request, path: path, staticMap: staticMap)
+                    // Compute base path for the regenerated static map
+                    var baseStaticMap = staticMap
+                    baseStaticMap.markers = nil
+                    baseStaticMap.polygons = nil
+                    baseStaticMap.circles = nil
+                    let basePath = baseStaticMap.path
+                    let baseExists = FileManager.default.fileExists(atPath: basePath)
+                    return self.generateStaticMapAndResponse(request: request, path: path, basePath: basePath, baseExists: baseExists, staticMap: staticMap)
                 }
             }
             let staticMap: StaticMap? = nil
