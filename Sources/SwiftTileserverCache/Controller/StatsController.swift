@@ -1,56 +1,64 @@
 import Vapor
 import Leaf
 
-internal final class StatsController: @unchecked Sendable {
+internal actor StatsController {
 
     private let fileToucher: FileToucher
     
-    // Serial queue for stats updates - avoids blocking request threads
-    private let statsQueue = DispatchQueue(label: "StatsController")
-    private var tileHitRatios = [String: HitRatio]()
-    private var staticMapHitRatios = [String: HitRatio]()
-    private var markerHitRatios = [String: HitRatio]()
+    private var tileHitRatios: [String: HitRatio] = [:]
+    private var staticMapHitRatios: [String: HitRatio] = [:]
+    private var markerHitRatios: [String: HitRatio] = [:]
 
     internal init(fileToucher: FileToucher) {
         self.fileToucher = fileToucher
     }
 
-    // MARK: - Stats
+    // MARK: - Stats (nonisolated for fire-and-forget from sync contexts)
 
-    internal func tileServed(new: Bool, path: String, style: String) {
+    nonisolated internal func tileServed(new: Bool, path: String, style: String) {
         if !new { fileToucher.touch(fileName: path) }
-        statsQueue.async {
-            if self.tileHitRatios[style] == nil { self.tileHitRatios[style] = HitRatio() }
-            self.tileHitRatios[style]!.served(new: new)
-        }
+        Task { await recordTile(new: new, style: style) }
     }
 
-    internal func staticMapServed(new: Bool, path: String, style: String) {
+    nonisolated internal func staticMapServed(new: Bool, path: String, style: String) {
         if !new { fileToucher.touch(fileName: path) }
-        statsQueue.async {
-            if self.staticMapHitRatios[style] == nil { self.staticMapHitRatios[style] = HitRatio() }
-            self.staticMapHitRatios[style]!.served(new: new)
-        }
+        Task { await recordStaticMap(new: new, style: style) }
     }
 
-    internal func markerServed(new: Bool, path: String, domain: String) {
+    nonisolated internal func markerServed(new: Bool, path: String, domain: String) {
         if !new { fileToucher.touch(fileName: path) }
-        statsQueue.async {
-            if self.markerHitRatios[domain] == nil { self.markerHitRatios[domain] = HitRatio() }
-            self.markerHitRatios[domain]!.served(new: new)
-        }
+        Task { await recordMarker(new: new, domain: domain) }
     }
+
+    // MARK: - Isolated recording
+
+    private func recordTile(new: Bool, style: String) {
+        if tileHitRatios[style] == nil { tileHitRatios[style] = HitRatio() }
+        tileHitRatios[style]!.served(new: new)
+    }
+
+    private func recordStaticMap(new: Bool, style: String) {
+        if staticMapHitRatios[style] == nil { staticMapHitRatios[style] = HitRatio() }
+        staticMapHitRatios[style]!.served(new: new)
+    }
+
+    private func recordMarker(new: Bool, domain: String) {
+        if markerHitRatios[domain] == nil { markerHitRatios[domain] = HitRatio() }
+        markerHitRatios[domain]!.served(new: new)
+    }
+
+    // MARK: - Getters
 
     internal func getTileStats() -> [String: HitRatio] {
-        return statsQueue.sync { tileHitRatios }
+        tileHitRatios
     }
 
     internal func getStaticMapStats() -> [String: HitRatio] {
-        return statsQueue.sync { staticMapHitRatios }
+        staticMapHitRatios
     }
 
     internal func getMarkerStats() -> [String: HitRatio] {
-        return statsQueue.sync { markerHitRatios }
+        markerHitRatios
     }
 
 }

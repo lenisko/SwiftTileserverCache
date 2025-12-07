@@ -274,15 +274,16 @@ internal final class StaticMapController: @unchecked Sendable {
         }
         
         // Batch all marker file existence checks in one threadPool call
+        let markerInfosCopy = markerInfos  // Copy for Sendable closure
         return request.application.threadPool.runIfActive(eventLoop: request.eventLoop) {
-            return markerInfos.map { info in
+            return markerInfosCopy.map { info in
                 let exists = FileManager.default.fileExists(atPath: info.path)
                 let fallbackExists = info.fallbackPath.map { FileManager.default.fileExists(atPath: $0) } ?? false
                 return (exists, fallbackExists)
             }
         }.flatMap { existsResults in
             var downloadFutures = [EventLoopFuture<Void>]()
-            for (index, info) in markerInfos.enumerated() {
+            for (index, info) in markerInfosCopy.enumerated() {
                 let (exists, fallbackExists) = existsResults[index]
                 
                 if exists {

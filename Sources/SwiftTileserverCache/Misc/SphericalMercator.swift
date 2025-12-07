@@ -24,111 +24,92 @@ public struct Coordinate: Sendable {
 
 }
 
-public final class SphericalMercator: @unchecked Sendable {
-    let EPSLN = 1.0e-10
-    let D2R = Double.pi / 180
-    let R2D = 180 / Double.pi
-    let A = 6378137.0
-    let MAXEXTENT = 20037508.342789244
+public struct SphericalMercator: Sendable {
+    private static let EPSLN = 1.0e-10
+    private static let D2R = Double.pi / 180
+    private static let R2D = 180 / Double.pi
+    private static let A = 6378137.0
+    private static let MAXEXTENT = 20037508.342789244
+    private static let size: Double = 256
 
-    let size: Double
+    // Pre-computed zoom level constants (30 levels)
+    private let Bc: [Double]
+    private let Cc: [Double]
+    private let zc: [Double]
+    private let Ac: [Double]
 
-
-    var cache: [Double: CacheSize] = [:]
-
-    class CacheSize {
-        var Bc: [Double] = []
-        var Cc: [Double] = []
-        var zc: [Double] = []
-        var Ac: [Double] = []
-    }
-
-    class Bounds {
+    struct Bounds: Sendable {
         var ws: Coordinate
         var en: Coordinate
-
-        public init(ws: Coordinate, en: Coordinate) {
-            self.ws = ws
-            self.en = en
-        }
     }
 
-    class XYZBounds {
+    struct XYZBounds: Sendable {
         var minPoint: Point
         var maxPoint: Point
-
-        public init(minPoint: Point, maxPoint: Point) {
-            self.minPoint = minPoint
-            self.maxPoint = maxPoint
-        }
     }
 
-    class Point {
+    struct Point: Sendable {
         var x: Double
         var y: Double
-
-        public init(x: Double, y: Double) {
-            self.x = x
-            self.y = y
-        }
     }
 
     public init() {
-        self.size = 256;
-        if cache[self.size] == nil {
-            var size = self.size
-            cache[size] = CacheSize()
-            let c = cache[size]
-            for _ in 0..<30 {
-                c?.Bc.append(size / 360)
-                c?.Cc.append(size / (2 * Double.pi))
-                c?.zc.append(size / 2)
-                c?.Ac.append(size)
-                size *= 2
-            }
+        var bc = [Double]()
+        var cc = [Double]()
+        var zc = [Double]()
+        var ac = [Double]()
+        bc.reserveCapacity(30)
+        cc.reserveCapacity(30)
+        zc.reserveCapacity(30)
+        ac.reserveCapacity(30)
+        
+        var size = Self.size
+        for _ in 0..<30 {
+            bc.append(size / 360)
+            cc.append(size / (2 * Double.pi))
+            zc.append(size / 2)
+            ac.append(size)
+            size *= 2
         }
+        
+        self.Bc = bc
+        self.Cc = cc
+        self.zc = zc
+        self.Ac = ac
     }
 
     /// Convert lon lat to screen pixel value
-    func px(coordinate: Coordinate, zoom: Int) -> Point? {
-        guard let cacheSize = cache[size] else {
-            return nil
+    func px(coordinate: Coordinate, zoom: Int) -> Point {
+        let d = zc[zoom]
+        let f = min(max(sin(Self.D2R * coordinate.latitude), -0.9999), 0.9999)
+        var x = round(d + coordinate.longitude * Bc[zoom])
+        var y = round(d + 0.5 * log((1 + f) / (1 - f)) * (-Cc[zoom]))
+        if x > Ac[zoom] {
+            x = Ac[zoom]
         }
-
-        let d = cacheSize.zc[zoom]
-        let f = min(max(sin(D2R * coordinate.latitude), -0.9999), 0.9999)
-        var x = round(d + coordinate.longitude * cacheSize.Bc[zoom])
-        var y = round(d + 0.5 * log((1 + f) / (1 - f)) * (-cacheSize.Cc[zoom]))
-        if x > cacheSize.Ac[zoom] {
-            x = cacheSize.Ac[zoom]
-        }
-
-        if y > cacheSize.Ac[zoom] {
-            y = cacheSize.Ac[zoom]
+        if y > Ac[zoom] {
+            y = Ac[zoom]
         }
         return Point(x: x, y: y)
     }
 
     /// Convert screen pixel value to Coordinate
-    func ll(px: Point, zoom: Int) -> Coordinate? {
-        guard let cacheSize = cache[size] else {
-            return nil
-        }
-        let g = (Double(px.y) - cacheSize.zc[zoom]) / (-cacheSize.Cc[zoom])
-        let longitude = (Double(px.x) - cacheSize.zc[zoom]) / cacheSize.Bc[zoom]
-        let latitude = R2D * (2 * atan(exp(g)) - 0.5 * Double.pi)
-        return Coordinate.init(latitude: latitude, longitude: longitude)
+    func ll(px: Point, zoom: Int) -> Coordinate {
+        let g = (px.y - zc[zoom]) / (-Cc[zoom])
+        let longitude = (px.x - zc[zoom]) / Bc[zoom]
+        let latitude = Self.R2D * (2 * atan(exp(g)) - 0.5 * Double.pi)
+        return Coordinate(latitude: latitude, longitude: longitude)
     }
 
-    /// Convert tile xyz value to Bounds of the form
+    /// Convert tile xyz value to Bounds
     func bbox(x: Double, y: Double, zoom: Int, tmsStyle: Bool, srs: String) -> Bounds {
         var _y = y
         if tmsStyle {
             _y = (Double(truncating: NSDecimalNumber(decimal: pow(2, zoom))) - 1) - y
         }
 
-        let ws = ll(px: Point(x: x * size, y: (+_y + 1) * size), zoom: zoom)!
-        let en = ll(px: Point(x: (+x + 1) * size, y: _y * size), zoom: zoom)!
+        let ws = ll(px: Point(x: x * Self.size, y: (_y + 1) * Self.size), zoom: zoom)
+        let en = ll(px: Point(x: (x + 1) * Self.size, y: _y * Self.size), zoom: zoom)
         let bounds = Bounds(ws: ws, en: en)
         if srs == "900913" {
             return convert(bounds, to: "900913")
@@ -136,25 +117,29 @@ public final class SphericalMercator: @unchecked Sendable {
         return bounds
     }
 
-    /// Convert bbounds to xyz bounds
+    /// Convert bounds to xyz bounds
     func xyz(bbox: Bounds, zoom: Int, tmsStyle: Bool, srs: String) -> XYZBounds {
         var _bbox = bbox
         if srs == "900913" {
             _bbox = convert(bbox, to: "WGS84")
         }
 
-        let px_ll = px(coordinate: _bbox.ws, zoom: zoom)!
-        let px_ur = px(coordinate: _bbox.en, zoom: zoom)!
+        let px_ll = px(coordinate: _bbox.ws, zoom: zoom)
+        let px_ur = px(coordinate: _bbox.en, zoom: zoom)
 
-        // Y = 0 for XYZ is the top hency minY use px_ur.y
-        let x = [floor(px_ll.x / size), floor((px_ur.x - 1) / size)]
-        let y = [floor(px_ur.y / size), floor((px_ll.y - 1) / size)]
+        // Y = 0 for XYZ is the top hence minY uses px_ur.y
+        let xVals = [floor(px_ll.x / Self.size), floor((px_ur.x - 1) / Self.size)]
+        let yVals = [floor(px_ur.y / Self.size), floor((px_ll.y - 1) / Self.size)]
 
-        let xyzBounds = XYZBounds(minPoint: Point(x: x.min()! < 0 ? 0 : x.min()!, y: y.min()! < 0 ? 0 : y.min()!), maxPoint: Point(x: x.max()!, y: y.max()!))
+        var xyzBounds = XYZBounds(
+            minPoint: Point(x: max(0, xVals.min()!), y: max(0, yVals.min()!)),
+            maxPoint: Point(x: xVals.max()!, y: yVals.max()!)
+        )
 
         if tmsStyle {
-            let minY = Double(truncating: NSDecimalNumber(decimal: pow(2, zoom))) - 1 - xyzBounds.maxPoint.y
-            let maxY = Double(truncating: NSDecimalNumber(decimal: pow(2, zoom))) - 1 - xyzBounds.minPoint.y
+            let zoomMax = Double(truncating: NSDecimalNumber(decimal: pow(2, zoom))) - 1
+            let minY = zoomMax - xyzBounds.maxPoint.y
+            let maxY = zoomMax - xyzBounds.minPoint.y
             xyzBounds.minPoint.y = minY
             xyzBounds.maxPoint.y = maxY
         }
@@ -162,13 +147,13 @@ public final class SphericalMercator: @unchecked Sendable {
         return xyzBounds
     }
 
-    /// Convert bbounds to xyz bounds
+    /// Convert coordinate to tile xyz
     func xy(coord: Coordinate, zoom: Int) -> (x: Int, y: Int, xDelta: Int16, yDelta: Int16) {
-        let pxC = px(coordinate: coord, zoom: zoom)!
-        let x = Int(pxC.x / size)
-        let xDelta = Int16(pxC.x.truncatingRemainder(dividingBy: size))
-        let y = Int(pxC.y / size)
-        let yDelta = Int16(pxC.y.truncatingRemainder(dividingBy: size))
+        let pxC = px(coordinate: coord, zoom: zoom)
+        let x = Int(pxC.x / Self.size)
+        let xDelta = Int16(pxC.x.truncatingRemainder(dividingBy: Self.size))
+        let y = Int(pxC.y / Self.size)
+        let yDelta = Int16(pxC.y.truncatingRemainder(dividingBy: Self.size))
         return (x, y, xDelta, yDelta)
     }
 
@@ -185,29 +170,23 @@ public final class SphericalMercator: @unchecked Sendable {
         }
     }
 
-    // Convert Coordinate to 900913 Point
+    /// Convert Coordinate to 900913 Point
     func forward(_ coordinate: Coordinate) -> Point {
-        let point = Point(x: A * coordinate.longitude * D2R,
-                          y: A * log(tan(Double.pi * 0.25 + 0.5 * coordinate.latitude * D2R)))
+        var x = Self.A * coordinate.longitude * Self.D2R
+        var y = Self.A * log(tan(Double.pi * 0.25 + 0.5 * coordinate.latitude * Self.D2R))
 
-        // if xy value is beyond maxextent (e.g. poles), return maxextent.
-        if point.x > MAXEXTENT {
-            point.x = MAXEXTENT
-        } else if point.x < -MAXEXTENT {
-            point.x = -MAXEXTENT
-        }
+        // Clamp to maxextent (e.g. poles)
+        x = min(max(x, -Self.MAXEXTENT), Self.MAXEXTENT)
+        y = min(max(y, -Self.MAXEXTENT), Self.MAXEXTENT)
 
-        if point.y > MAXEXTENT {
-            point.y = MAXEXTENT
-        } else if point.y < -MAXEXTENT {
-            point.y = -MAXEXTENT
-        }
-
-        return point
+        return Point(x: x, y: y)
     }
 
-    // Convert 900913 Point to Coordinate
+    /// Convert 900913 Point to Coordinate
     func inverse(_ point: Point) -> Coordinate {
-        return Coordinate.init(latitude: (Double.pi * 0.5) - 2.0 * atan(exp(-point.y / A)) * R2D, longitude: point.x * R2D / A)
+        Coordinate(
+            latitude: (Double.pi * 0.5 - 2.0 * atan(exp(-point.y / Self.A))) * Self.R2D,
+            longitude: point.x * Self.R2D / Self.A
+        )
     }
 }

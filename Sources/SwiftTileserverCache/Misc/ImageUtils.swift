@@ -291,15 +291,11 @@ public class ImageUtils {
             realOffsetX = 0
             realOffsetY = 0
         } else {
-            if let px1 = sphericalMercator.px(coordinate: Coordinate(latitude: center.latitude, longitude: center.longitude), zoom: 20),
-                let px2 = sphericalMercator.px(coordinate: Coordinate(latitude: at.latitude, longitude: at.longitude), zoom: 20) {
-                let pxScale = pow(2, Double(zoom) - 20)
-                realOffsetX = Int((px2.x - px1.x) * Double(pxScale) * Double(scale))
-                realOffsetY = Int((px2.y - px1.y) * Double(pxScale) * Double(scale))
-            } else {
-                realOffsetX = 0
-                realOffsetY = 0
-            }
+            let px1 = sphericalMercator.px(coordinate: Coordinate(latitude: center.latitude, longitude: center.longitude), zoom: 20)
+            let px2 = sphericalMercator.px(coordinate: Coordinate(latitude: at.latitude, longitude: at.longitude), zoom: 20)
+            let pxScale = pow(2, Double(zoom) - 20)
+            realOffsetX = Int((px2.x - px1.x) * pxScale * Double(scale))
+            realOffsetY = Int((px2.y - px1.y) * pxScale * Double(scale))
         }
         return (realOffsetX + (Int(extraX) * Int(scale)), realOffsetY + (Int(extraY) * Int(scale)))
     }

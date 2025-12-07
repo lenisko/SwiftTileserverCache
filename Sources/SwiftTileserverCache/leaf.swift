@@ -6,7 +6,8 @@ public func leaf(_ app: Application) throws {
         app.leaf.cache.isEnabled = true
         let clearDelaySeconds = UInt32(Environment.get("TEMPLATES_CACHE_DELAY_SECONDS") ?? "") ?? 60
         app.logger.notice("Starting LeafCacheCleaner for Templates with clearDelaySeconds: \(clearDelaySeconds)")
-        _ = LeafCacheCleaner(app: app, folder: "Templates", clearDelaySeconds: clearDelaySeconds)
+        let leafCacheCleaner = LeafCacheCleaner(app: app, folder: "Templates", clearDelaySeconds: clearDelaySeconds)
+        Task { await leafCacheCleaner.start() }
     } else {
         app.leaf.cache.isEnabled = false
     }
