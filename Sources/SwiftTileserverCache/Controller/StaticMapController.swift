@@ -1,7 +1,7 @@
 import Vapor
 import Leaf
 
-internal class StaticMapController {
+internal final class StaticMapController: @unchecked Sendable {
     
     private let tileServerURL: String
     private let tileController: TileController

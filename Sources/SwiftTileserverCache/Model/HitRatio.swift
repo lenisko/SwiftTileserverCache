@@ -1,6 +1,6 @@
 import Foundation
 
-public struct HitRatio: Codable {
+public struct HitRatio: Codable, Sendable {
     public var cached: UInt64 = 0
     public var total: UInt64 = 0
     public var percentageString: String {

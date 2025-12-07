@@ -1,7 +1,7 @@
 import Foundation
 import Vapor
 
-public class FileToucher {
+public final class FileToucher: @unchecked Sendable {
 
     private let logger: Logger
     private let fileManager = FileManager()

@@ -1,6 +1,6 @@
 import Foundation
 
-public struct Marker: Codable, Hashable, Drawable {
+public struct Marker: Codable, Hashable, Drawable, Sendable {
     public var url: String
     public var fallbackUrl: String?
     public var height: UInt16

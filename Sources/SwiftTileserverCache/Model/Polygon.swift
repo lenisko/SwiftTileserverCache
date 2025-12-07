@@ -1,6 +1,6 @@
 import Foundation
 
-public struct Polygon: Codable, Hashable, Drawable {
+public struct Polygon: Codable, Hashable, Drawable, Sendable {
     public var fillColor: String
     public var strokeColor: String
     public var strokeWidth: UInt8

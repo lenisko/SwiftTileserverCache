@@ -1,7 +1,7 @@
 import Foundation
 
 // Source: https://github.com/qin9smile/sphericalmercator.swift/blob/master/sphericalmercator.swift
-public struct Coordinate {
+public struct Coordinate: Sendable {
     public var latitude: Double
     public var longitude: Double
 
@@ -24,7 +24,7 @@ public struct Coordinate {
 
 }
 
-public class SphericalMercator {
+public final class SphericalMercator: @unchecked Sendable {
     let EPSLN = 1.0e-10
     let D2R = Double.pi / 180
     let R2D = 180 / Double.pi

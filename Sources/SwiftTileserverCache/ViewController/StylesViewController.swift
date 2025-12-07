@@ -2,7 +2,7 @@ import Foundation
 import Vapor
 import Leaf
 
-internal class StylesViewController: ViewController {
+internal final class StylesViewController: ViewController, @unchecked Sendable {
 
     internal struct Context: ViewControllerContext {
         var pageId: String

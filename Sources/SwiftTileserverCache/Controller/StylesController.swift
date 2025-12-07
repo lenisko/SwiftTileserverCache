@@ -2,7 +2,7 @@ import Vapor
 import Leaf
 import ZIPFoundation
 
-internal class StylesController {
+internal final class StylesController: @unchecked Sendable {
 
     struct SaveStyleFiles: Content {
         var id: String

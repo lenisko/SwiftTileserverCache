@@ -1,7 +1,7 @@
 import Vapor
 import Leaf
 
-internal class MultiStaticMapController {
+internal final class MultiStaticMapController: @unchecked Sendable {
 
     private let staticMapController: StaticMapController
     private let statsController: StatsController

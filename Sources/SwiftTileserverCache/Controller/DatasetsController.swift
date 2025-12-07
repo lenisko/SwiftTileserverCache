@@ -1,6 +1,6 @@
 import Vapor
 
-internal class DatasetsController {
+internal final class DatasetsController: @unchecked Sendable {
 
     struct SaveDataset: Content {
         var name: String

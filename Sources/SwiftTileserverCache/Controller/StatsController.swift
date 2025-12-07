@@ -1,7 +1,7 @@
 import Vapor
 import Leaf
 
-internal class StatsController {
+internal final class StatsController: @unchecked Sendable {
 
     private let fileToucher: FileToucher
     

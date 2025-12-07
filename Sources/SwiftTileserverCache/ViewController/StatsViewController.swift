@@ -2,7 +2,7 @@ import Foundation
 import Vapor
 import Leaf
 
-internal class StatsViewController: ViewController {
+internal final class StatsViewController: ViewController, @unchecked Sendable {
 
     internal struct Context: ViewControllerContext {
         struct Ratio: Encodable {

@@ -1,6 +1,6 @@
 import Vapor
 
-internal class TileController {
+internal final class TileController: @unchecked Sendable {
 
     private let tileServerURL: String
     private let statsController: StatsController

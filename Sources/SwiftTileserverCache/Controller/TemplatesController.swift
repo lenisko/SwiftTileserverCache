@@ -1,7 +1,7 @@
 import Vapor
 import Leaf
 
-internal class TemplatesController {
+internal final class TemplatesController: @unchecked Sendable {
 
     struct PreviewTemplate: Decodable {
         enum Mode: String, Decodable {

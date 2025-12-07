@@ -2,7 +2,7 @@ import Foundation
 import Vapor
 import Leaf
 
-internal class StylesAddExternalViewController: ViewController {
+internal final class StylesAddExternalViewController: ViewController, @unchecked Sendable {
 
     internal struct Context: ViewControllerContext {
         var pageId: String

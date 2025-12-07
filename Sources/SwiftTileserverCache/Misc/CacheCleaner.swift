@@ -1,7 +1,7 @@
 import Foundation
 import Vapor
 
-public class CacheCleaner {
+public final class CacheCleaner: @unchecked Sendable {
 
     private let logger: Logger
     private let folder: URL

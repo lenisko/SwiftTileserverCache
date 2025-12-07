@@ -1,6 +1,6 @@
 import Foundation
 
-public struct Circle: Codable, Hashable, Drawable {
+public struct Circle: Codable, Hashable, Drawable, Sendable {
     public var fillColor: String
     public var strokeColor: String
     public var strokeWidth: UInt8
