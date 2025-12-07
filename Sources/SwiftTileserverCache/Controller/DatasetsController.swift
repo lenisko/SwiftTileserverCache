@@ -22,20 +22,21 @@ internal final class DatasetsController: @unchecked Sendable {
     // MARK: - Routes
 
     internal func download(request: Request, websocket: WebSocket) -> () {
-        websocket.onText { (websocket, text) in
+        let listFolder = self.listFolder
+        websocket.onText { [weak self] (websocket, text) in
             let split = text.components(separatedBy: ";")
             guard split.count == 2, let url = URL(string: split[1]) else {
                 return websocket.send("Invalid URL")
             }
             let name = split[0]
             request.logger.info("Downloading \(name).mbtiles (\(url.absoluteString))")
-            APIUtils.downloadFile(request: request, from: url.absoluteString, to: self.listFolder + "/\(name).mbtiles", type: nil).whenComplete { (result) in
+            APIUtils.downloadFile(request: request, from: url.absoluteString, to: listFolder + "/\(name).mbtiles", type: nil).whenComplete { [weak self] (result) in
                 switch result {
                 case .success:
                     request.logger.info("Downloading \(name).mbtiles done")
                     websocket.send("downloaded")
                     request.logger.info("Combining mbtiles")
-                    self.combineTiles(request: request).whenComplete { (result) in
+                    self?.combineTiles(request: request).whenComplete { (result) in
                         switch result {
                         case .success:
                             request.logger.info("Combining mbtiles done")
@@ -54,10 +55,11 @@ internal final class DatasetsController: @unchecked Sendable {
     }
 
     internal func delete(request: Request, websocket: WebSocket) -> () {
-        websocket.onText { (websocket, text) in
+        let listFolder = self.listFolder
+        websocket.onText { [weak self] (websocket, text) in
             let name = text
             do {
-                try FileManager.default.removeItem(atPath: self.listFolder + "/\(name).mbtiles")
+                try FileManager.default.removeItem(atPath: listFolder + "/\(name).mbtiles")
             } catch {
                 request.logger.error("Failed to delete \(name).mbtiles: \(error.localizedDescription)")
                 websocket.send(error.localizedDescription)
@@ -65,7 +67,7 @@ internal final class DatasetsController: @unchecked Sendable {
             }
             websocket.send("deleted")
             request.logger.info("Combining mbtiles")
-            self.combineTiles(request: request).whenComplete { (result) in
+            self?.combineTiles(request: request).whenComplete { (result) in
                 switch result {
                 case .success:
                     request.logger.info("Combining mbtiles done")

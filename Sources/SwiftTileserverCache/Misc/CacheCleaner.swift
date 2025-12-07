@@ -15,8 +15,8 @@ public final class CacheCleaner: @unchecked Sendable {
         try? FileManager.default.createDirectory(atPath: folder, withIntermediateDirectories: true)
         if maxAgeMinutes != nil && clearDelaySeconds != nil {
             self.logger.notice("Starting CacheCleaner for \(folder) with maxAgeMinutes: \(maxAgeMinutes!) and clearDelaySeconds: \(clearDelaySeconds!)")
-            thread.async {
-                while true {
+            thread.async { [weak self] in
+                while let self = self {
                     self.runOnce()
                     sleep(clearDelaySeconds!)
                 }

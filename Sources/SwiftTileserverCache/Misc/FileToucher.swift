@@ -6,14 +6,15 @@ public final class FileToucher: @unchecked Sendable {
     private let logger: Logger
     private let fileManager = FileManager()
     private let queueLock = NSLock()
-    private var queue = [String]()
+    private var queue: [String] = []
+    private static let maxQueueSize = 50000
 
     public init() {
         let uuidString = UUID().uuidString
         self.logger = Logger(label: "FileToucher-\(uuidString)")
         let thread = DispatchQueue(label: "FileToucher-\(uuidString)")
-        thread.async {
-            while true {
+        thread.async { [weak self] in
+            while let self = self {
                 self.runOnce()
                 sleep(30)
             }
@@ -23,7 +24,7 @@ public final class FileToucher: @unchecked Sendable {
     private func runOnce() {
         queueLock.lock()
         let currentQueue = queue
-        queue = []
+        queue.removeAll(keepingCapacity: false) // release mem
         queueLock.unlock()
 
         var count = 0
@@ -46,8 +47,13 @@ public final class FileToucher: @unchecked Sendable {
 
     public func touch(fileName: String) {
         queueLock.lock()
+        defer { queueLock.unlock() }
+        // Prevent unbounded queue growth
+        guard queue.count < Self.maxQueueSize else {
+            logger.warning("FileToucher queue full, dropping touch request")
+            return
+        }
         queue.append(fileName)
-        queueLock.unlock()
     }
 
 }
