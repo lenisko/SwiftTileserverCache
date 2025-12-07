@@ -92,17 +92,13 @@ internal final class StaticMapController: @unchecked Sendable {
             if !exists {
                 return self.generateStaticMapAndResponse(request: request, path: path, basePath: basePath, baseExists: baseExists, staticMap: staticMap).always { result in
                     if case .success = result {
-                        request.application.logger.info("Served a generated static map")
                         self.statsController.staticMapServed(new: true, path: path, style: staticMap.style)
                     }
                 }
             } else {
-                return ResponseUtils.generateResponse(request: request, staticMap: staticMap, path: path).always { result in
-                    if case .success = result {
-                        request.application.logger.info("Served a cached static map")
-                        self.statsController.staticMapServed(new: false, path: path, style: staticMap.style)
-                    }
-                }
+                request.application.logger.info("Served static map (cached)")
+                self.statsController.staticMapServed(new: false, path: path, style: staticMap.style)
+                return ResponseUtils.generateResponse(request: request, staticMap: staticMap, path: path)
             }
         }
     }
@@ -128,12 +124,9 @@ internal final class StaticMapController: @unchecked Sendable {
                     return self.generateStaticMapAndResponse(request: request, path: path, basePath: basePath, baseExists: baseExists, staticMap: staticMap)
                 }
             }
+            request.application.logger.info("Served static map (pregenerated)")
             let staticMap: StaticMap? = nil
-            return ResponseUtils.generateResponse(request: request, staticMap: staticMap, path: path).always { result in
-                if case .success = result {
-                    request.application.logger.info("Served a pregenerate static map")
-                }
-            }
+            return ResponseUtils.generateResponse(request: request, staticMap: staticMap, path: path)
         }
     }
     
@@ -200,7 +193,7 @@ internal final class StaticMapController: @unchecked Sendable {
         let xOffsetRight = max(0, Int(ceil((Double(staticMap.width) - (256 - Double(point.xDelta))) / 256)))
         let yOffsetLeft = max(0, Int(ceil((Double(staticMap.height) - Double(point.yDelta)) / 256)))
         let yOffsetRight = max(0, Int(ceil((Double(staticMap.height) - (256 - Double(point.yDelta))) / 256)))
-        var futures = [EventLoopFuture<String>]()
+        var futures = [EventLoopFuture<TileController.TileResult>]()
         for xOffset in -xOffsetLeft...xOffsetRight {
             for yOffset in -yOffsetLeft...yOffsetRight {
                 futures.append(tileController.generateTile(
@@ -215,11 +208,14 @@ internal final class StaticMapController: @unchecked Sendable {
             }
         }
 
-        return request.eventLoop.flatten(futures).flatMap( { tilePaths in
+        return request.eventLoop.flatten(futures).flatMap( { tileResults in
+            let cached = tileResults.filter { $0.cached }.count
+            let fetched = tileResults.count - cached
+            request.application.logger.info("Served static map (tiles: \(fetched) fetched, \(cached) cached)")
             return ImageUtils.generateBaseStaticMap(
                 request: request,
                 staticMap: staticMap,
-                tilePaths: tilePaths,
+                tilePaths: tileResults.map { $0.path },
                 path: path,
                 offsetX: Int(point.xDelta) + xOffsetLeft * 256,
                 offsetY: Int(point.yDelta) + yOffsetLeft * 256,

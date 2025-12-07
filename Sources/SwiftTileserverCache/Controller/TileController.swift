@@ -31,12 +31,18 @@ internal final class TileController: @unchecked Sendable {
 
     // MARK: - Utils
 
-    internal func generateTile(request: Request, style: String, z: Int, x: Int, y: Int, scale: UInt8, format: ImageFormat) -> EventLoopFuture<String> {
+    /// Result of tile generation: path and whether it was cached
+    internal struct TileResult {
+        let path: String
+        let cached: Bool
+    }
+
+    /// Generate tile and return result with cache status
+    internal func generateTile(request: Request, style: String, z: Int, x: Int, y: Int, scale: UInt8, format: ImageFormat) -> EventLoopFuture<TileResult> {
         let path = "Cache/Tile/\(style)-\(z)-\(x)-\(y)-\(scale).\(format)"
         guard !FileManager.default.fileExists(atPath: path) else {
-            request.application.logger.info("Served a cached tile")
             self.statsController.tileServed(new: false, path: path, style: style)
-            return request.eventLoop.future(path)
+            return request.eventLoop.future(TileResult(path: path, cached: true))
         }
 
         let scaleString = scale == 1 ? "" : "@\(scale)x"
@@ -55,15 +61,15 @@ internal final class TileController: @unchecked Sendable {
             return request.eventLoop.makeFailedFuture(Abort(.badRequest, reason: "Failed to load tile: \(tileURL) (\(error.localizedDescription))"))
         }.always { result in
             if case .success = result {
-                request.application.logger.info("Served a generated tile")
                 self.statsController.tileServed(new: true, path: path, style: style)
             }
-        }.transform(to: path)
+        }.transform(to: TileResult(path: path, cached: false))
     }
 
     private func generateTileAndResponse(request: Request, style: String, z: Int, x: Int, y: Int, scale: UInt8, format: ImageFormat) -> EventLoopFuture<Response> {
-        return generateTile(request: request, style: style, z: z, x: x, y: y, scale: scale, format: format).flatMap { path in
-            return self.generateResponse(request: request, path: path)
+        return generateTile(request: request, style: style, z: z, x: x, y: y, scale: scale, format: format).flatMap { result in
+            request.application.logger.info("Served tile (cached: \(result.cached))")
+            return self.generateResponse(request: request, path: result.path)
         }
     }
 

@@ -56,17 +56,13 @@ internal final class MultiStaticMapController: @unchecked Sendable {
             if !exists {
                 return self.generateStaticMapAndResponse(request: request, path: path, multiStaticMap: multiStaticMap).always { result in
                     if case .success = result {
-                        request.application.logger.info("Served a generated multi-static map")
                         self.statsController.staticMapServed(new: true, path: path, style: "multi")
                     }
                 }
             } else {
-                return ResponseUtils.generateResponse(request: request, staticMap: multiStaticMap, path: path).always { result in
-                    if case .success = result {
-                        request.application.logger.info("Served a cached multi-static map")
-                        self.statsController.staticMapServed(new: false, path: path, style: "multi")
-                    }
-                }
+                request.application.logger.info("Served multi-static map (cached)")
+                self.statsController.staticMapServed(new: false, path: path, style: "multi")
+                return ResponseUtils.generateResponse(request: request, staticMap: multiStaticMap, path: path)
             }
         }
     }
@@ -85,12 +81,9 @@ internal final class MultiStaticMapController: @unchecked Sendable {
                     return self.generateStaticMapAndResponse(request: request, path: path, multiStaticMap: multiStaticMap)
                 }
             }
+            request.application.logger.info("Served multi-static map (pregenerated)")
             let staticMap: StaticMap? = nil
-            return ResponseUtils.generateResponse(request: request, staticMap: staticMap, path: path).always { result in
-                if case .success = result {
-                    request.application.logger.info("Served a pregenerate multi-static map")
-                }
-            }
+            return ResponseUtils.generateResponse(request: request, staticMap: staticMap, path: path)
         }
     }
 
@@ -123,6 +116,7 @@ internal final class MultiStaticMapController: @unchecked Sendable {
         }
         return request.eventLoop.flatten(mapFutures).flatMap {
             return ImageUtils.generateMultiStaticMap(request: request, multiStaticMap: multiStaticMap, path: path).flatMap {
+                request.application.logger.info("Served multi-static map (generated, \(maps.count) maps)")
                 return ResponseUtils.generateResponse(request: request, staticMap: multiStaticMap, path: path)
             }
         }
