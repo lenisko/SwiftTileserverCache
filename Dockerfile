@@ -19,7 +19,7 @@ RUN swift build \
 # ================================
 # Run image
 # ================================
-FROM swift:6.0-slim
+FROM swift:6.0
 WORKDIR /SwiftTileserverCache
 
 # Install imagemagick
