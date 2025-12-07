@@ -29,7 +29,7 @@ public class FileToucher {
         var count = 0
         if !currentQueue.isEmpty {
             // use smaller batch size to avoid command line length limits
-            for slice in currentQueue.chunked(into: 50) {
+            for slice in currentQueue.chunked(into: 75) {
                 guard !slice.isEmpty else { continue }
                 do {
                     try escapedShellOut(to: "/usr/bin/touch", arguments: ["-c"] + slice)
