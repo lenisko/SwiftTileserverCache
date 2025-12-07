@@ -56,28 +56,34 @@ internal class StaticMapController {
     
     internal func generateStaticMap(request: Request, staticMap: StaticMap) -> EventLoopFuture<Void> {
         let path = staticMap.path
-        guard !FileManager.default.fileExists(atPath: path) else {
-            return request.eventLoop.future()
+        return request.application.threadPool.runIfActive(eventLoop: request.eventLoop) {
+            return FileManager.default.fileExists(atPath: path)
+        }.flatMap { exists in
+            if exists { return request.eventLoop.future() }
+            return self.generateStaticMap(request: request, path: path, staticMap: staticMap)
         }
-        return self.generateStaticMap(request: request, path: path, staticMap: staticMap)
     }
     
     // MARK: - Utils
     
     internal func handleRequest(request: Request, staticMap: StaticMap) -> EventLoopFuture<Response> {
         let path = staticMap.path
-        if !FileManager.default.fileExists(atPath: path) {
-            return generateStaticMapAndResponse(request: request, path: path, staticMap: staticMap).always { result in
-                if case .success = result {
-                    request.application.logger.info("Served a generated static map")
-                    self.statsController.staticMapServed(new: true, path: path, style: staticMap.style)
+        return request.application.threadPool.runIfActive(eventLoop: request.eventLoop) {
+            return FileManager.default.fileExists(atPath: path)
+        }.flatMap { exists in
+            if !exists {
+                return self.generateStaticMapAndResponse(request: request, path: path, staticMap: staticMap).always { result in
+                    if case .success = result {
+                        request.application.logger.info("Served a generated static map")
+                        self.statsController.staticMapServed(new: true, path: path, style: staticMap.style)
+                    }
                 }
-            }
-        } else {
-            return ResponseUtils.generateResponse(request: request, staticMap: staticMap, path: path).always { result in
-                if case .success = result {
-                    request.application.logger.info("Served a cached static map")
-                    self.statsController.staticMapServed(new: false, path: path, style: staticMap.style)
+            } else {
+                return ResponseUtils.generateResponse(request: request, staticMap: staticMap, path: path).always { result in
+                    if case .success = result {
+                        request.application.logger.info("Served a cached static map")
+                        self.statsController.staticMapServed(new: false, path: path, style: staticMap.style)
+                    }
                 }
             }
         }
@@ -85,19 +91,23 @@ internal class StaticMapController {
     
     private func handleRequest(request: Request, id: String) -> EventLoopFuture<Response> {
         let path = "Cache/Static/\(id)"
-        guard FileManager.default.fileExists(atPath: path) else {
-            let regeneratablePath = "Cache/Regeneratable/\(path.components(separatedBy: "/").last!).json"
-            guard FileManager.default.fileExists(atPath: regeneratablePath) else {
-                return request.eventLoop.makeFailedFuture(Abort(.notFound, reason: "No regeneratable found with this id"))
+        let regeneratablePath = "Cache/Regeneratable/\(path.components(separatedBy: "/").last!).json"
+        return request.application.threadPool.runIfActive(eventLoop: request.eventLoop) {
+            return (FileManager.default.fileExists(atPath: path), FileManager.default.fileExists(atPath: regeneratablePath))
+        }.flatMap { (exists, regeneratableExists) in
+            if !exists {
+                guard regeneratableExists else {
+                    return request.eventLoop.makeFailedFuture(Abort(.notFound, reason: "No regeneratable found with this id"))
+                }
+                return ResponseUtils.readRegeneratable(request: request, path: regeneratablePath, as: StaticMap.self).flatMap { staticMap in
+                    return self.generateStaticMapAndResponse(request: request, path: path, staticMap: staticMap)
+                }
             }
-            return ResponseUtils.readRegeneratable(request: request, path: regeneratablePath, as: StaticMap.self).flatMap { staicMap in
-                return self.generateStaticMapAndResponse(request: request, path: path, staticMap: staicMap)
-            }
-        }
-        let staticMap: StaticMap? = nil
-        return ResponseUtils.generateResponse(request: request, staticMap: staticMap, path: path).always { result in
-            if case .success = result {
-                request.application.logger.info("Served a pregenerate static map")
+            let staticMap: StaticMap? = nil
+            return ResponseUtils.generateResponse(request: request, staticMap: staticMap, path: path).always { result in
+                if case .success = result {
+                    request.application.logger.info("Served a pregenerate static map")
+                }
             }
         }
     }
@@ -133,12 +143,16 @@ internal class StaticMapController {
         baseStaticMap.circles = nil
         let basePath = baseStaticMap.path
         
-        if !FileManager.default.fileExists(atPath: basePath) {
-            return loadBaseStaticMap(request: request, path: basePath, staticMap: baseStaticMap).flatMap {
+        return request.application.threadPool.runIfActive(eventLoop: request.eventLoop) {
+            return FileManager.default.fileExists(atPath: basePath)
+        }.flatMap { exists in
+            if !exists {
+                return self.loadBaseStaticMap(request: request, path: basePath, staticMap: baseStaticMap).flatMap {
+                    return self.generateFilledStaticMap(request: request, basePath: basePath, path: path, staticMap: staticMap)
+                }
+            } else {
                 return self.generateFilledStaticMap(request: request, basePath: basePath, path: path, staticMap: staticMap)
             }
-        } else {
-            return self.generateFilledStaticMap(request: request, basePath: basePath, path: path, staticMap: staticMap)
         }
     }
     
@@ -237,26 +251,34 @@ internal class StaticMapController {
             let markerFormat = url.components(separatedBy: ".").last ?? "png"
             let path = "Cache/Marker/\(markerHashed).\(markerFormat)"
             let domain = url.components(separatedBy: "//").last?.components(separatedBy: "/").first ?? "?"
-            guard !FileManager.default.fileExists(atPath: path) else {
-                statsController.markerServed(new: false, path: path, domain: domain)
-                return request.eventLoop.future()
-            }
-            return APIUtils.downloadFile(request: request, from: url, to: path, type: "image").always { result in
-                if case .success = result {
-                    self.statsController.markerServed(new: true, path: path, domain: domain)
+            return request.application.threadPool.runIfActive(eventLoop: request.eventLoop) {
+                return FileManager.default.fileExists(atPath: path)
+            }.flatMap { exists in
+                if exists {
+                    self.statsController.markerServed(new: false, path: path, domain: domain)
+                    return request.eventLoop.future()
                 }
-            }.flatMapError { error in
-                return request.eventLoop.makeFailedFuture(Abort(.badRequest, reason: "Failed to load marker: \(url) (\(error.localizedDescription))"))
+                return APIUtils.downloadFile(request: request, from: url, to: path, type: "image").always { result in
+                    if case .success = result {
+                        self.statsController.markerServed(new: true, path: path, domain: domain)
+                    }
+                }.flatMapError { error in
+                    return request.eventLoop.makeFailedFuture(Abort(.badRequest, reason: "Failed to load marker: \(url) (\(error.localizedDescription))"))
+                }
             }
         } else {
             let path = "Markers/\(url)"
             guard !path.contains("..") else {
                 return request.eventLoop.future(error: Abort(.badRequest, reason: "Path is not allowed to contain \"..\""))
             }
-            guard FileManager.default.fileExists(atPath: path) else {
-                return request.eventLoop.future(error: Abort(.notFound, reason: "Marker not found"))
+            return request.application.threadPool.runIfActive(eventLoop: request.eventLoop) {
+                return FileManager.default.fileExists(atPath: path)
+            }.flatMap { exists in
+                if !exists {
+                    return request.eventLoop.makeFailedFuture(Abort(.notFound, reason: "Marker not found"))
+                }
+                return request.eventLoop.future()
             }
-            return request.eventLoop.future()
         }
     }
 
