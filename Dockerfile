@@ -37,8 +37,16 @@ RUN git clone https://github.com/mapbox/tippecanoe.git -b 1.36.0 \
 # Install fontnik requirements
 RUN apt-get -y update && apt-get -y install nodejs npm curl
 
-# Install fontnik
-RUN npm install -g fontnik@0.7.4
+# Install fontnik (arm64 needs custom build)
+RUN if [ "$(dpkg --print-architecture)" = "arm64" ]; then \
+        git clone -b fix-build-errors-node14 https://github.com/3nprob/node-fontnik.git ./fontnik \
+        && cd fontnik \
+        && mkdir .toolchain \
+        && npm install --build-from-source \
+        && npm link; \
+    else \
+        npm install -g fontnik@0.7.4; \
+    fi
 
 # Copy build artifacts
 COPY --from=build /build/.build/release /SwiftTileserverCache
