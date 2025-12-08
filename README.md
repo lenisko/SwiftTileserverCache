@@ -4,7 +4,7 @@
 
 - Install Docker
 - Create a new folder to store the yml file in and change into it: `mkdir TileServer && cd TileServer`
-- Load the yml: `wget https://raw.githubusercontent.com/123FLO321/SwiftTileserverCache/master/docker-compose.yml`
+- Load the yml: `wget https://raw.githubusercontent.com/lenisko/SwiftTileserverCache/master/docker-compose.yml`
 - Edit the docker-compose.yml file if you want to change defaults. Default will work fine.
 - Create a new folder to store TileServer data in and chagne into it: `mkdir TileServer && cd TileServer`
 - Get Download command from https://openmaptiles.com/downloads/planet/ for your region.
@@ -281,3 +281,8 @@ View: `GET https://tileserverurl/staticmap/pregenerated/{id}`
 ```
 `GET https://tileserverurl/staticmap/pokemon?id=201&lat=47.263416&lon=11.400512&form=5`
 ![staticmap-template response](.exampleimages/staticmaptemplate.png)
+
+
+### Notes
+
+Thanks to @123FLO321 for years of SwiftTileserverCache development. And @3nprob for node-fontnik with arm64 support.
