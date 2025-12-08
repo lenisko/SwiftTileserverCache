@@ -1,7 +1,7 @@
 import Vapor
 import Leaf
 
-internal class StaticMapController {
+internal final class StaticMapController: @unchecked Sendable {
     
     private let tileServerURL: String
     private let tileController: TileController
@@ -56,49 +56,85 @@ internal class StaticMapController {
     
     internal func generateStaticMap(request: Request, staticMap: StaticMap) -> EventLoopFuture<Void> {
         let path = staticMap.path
-        guard !FileManager.default.fileExists(atPath: path) else {
-            return request.eventLoop.future()
+        
+        // Compute base path upfront for batched file checks
+        var baseStaticMap = staticMap
+        baseStaticMap.markers = nil
+        baseStaticMap.polygons = nil
+        baseStaticMap.circles = nil
+        let basePath = baseStaticMap.path
+        
+        // Batch both file existence checks in one threadPool call
+        return request.application.threadPool.runIfActive(eventLoop: request.eventLoop) {
+            return (FileManager.default.fileExists(atPath: path), FileManager.default.fileExists(atPath: basePath))
+        }.flatMap { (exists, baseExists) in
+            if exists { return request.eventLoop.future() }
+            return self.generateStaticMap(request: request, path: path, basePath: basePath, baseExists: baseExists, staticMap: staticMap)
         }
-        return self.generateStaticMap(request: request, path: path, staticMap: staticMap)
     }
     
     // MARK: - Utils
     
     internal func handleRequest(request: Request, staticMap: StaticMap) -> EventLoopFuture<Response> {
         let path = staticMap.path
-        if !FileManager.default.fileExists(atPath: path) {
-            return generateStaticMapAndResponse(request: request, path: path, staticMap: staticMap).always { result in
-                if case .success = result {
-                    request.application.logger.info("Served a generated static map")
-                    self.statsController.staticMapServed(new: true, path: path, style: staticMap.style)
+        let startTime = DispatchTime.now()
+        MetricsManager.shared.incrementInFlight(type: "staticmap")
+        
+        // Compute base path upfront for batched file checks
+        var baseStaticMap = staticMap
+        baseStaticMap.markers = nil
+        baseStaticMap.polygons = nil
+        baseStaticMap.circles = nil
+        let basePath = baseStaticMap.path
+        
+        // Batch both file existence checks in one threadPool call
+        return request.application.threadPool.runIfActive(eventLoop: request.eventLoop) {
+            return (FileManager.default.fileExists(atPath: path), FileManager.default.fileExists(atPath: basePath))
+        }.flatMap { (exists, baseExists) in
+            if !exists {
+                return self.generateStaticMapAndResponse(request: request, path: path, basePath: basePath, baseExists: baseExists, staticMap: staticMap).always { result in
+                    let duration = Double(DispatchTime.now().uptimeNanoseconds - startTime.uptimeNanoseconds) / 1_000_000_000
+                    if case .success = result {
+                        self.statsController.staticMapServed(new: true, path: path, style: staticMap.style)
+                        MetricsManager.shared.recordRequest(type: "staticmap", style: staticMap.style, cached: false, duration: duration)
+                    }
                 }
+            } else {
+                let duration = Double(DispatchTime.now().uptimeNanoseconds - startTime.uptimeNanoseconds) / 1_000_000_000
+                request.application.logger.info("Served static map (cached)")
+                self.statsController.staticMapServed(new: false, path: path, style: staticMap.style)
+                MetricsManager.shared.recordRequest(type: "staticmap", style: staticMap.style, cached: true, duration: duration)
+                return ResponseUtils.generateResponse(request: request, staticMap: staticMap, path: path)
             }
-        } else {
-            return ResponseUtils.generateResponse(request: request, staticMap: staticMap, path: path).always { result in
-                if case .success = result {
-                    request.application.logger.info("Served a cached static map")
-                    self.statsController.staticMapServed(new: false, path: path, style: staticMap.style)
-                }
-            }
+        }.always { _ in
+            MetricsManager.shared.decrementInFlight(type: "staticmap")
         }
     }
     
     private func handleRequest(request: Request, id: String) -> EventLoopFuture<Response> {
         let path = "Cache/Static/\(id)"
-        guard FileManager.default.fileExists(atPath: path) else {
-            let regeneratablePath = "Cache/Regeneratable/\(path.components(separatedBy: "/").last!).json"
-            guard FileManager.default.fileExists(atPath: regeneratablePath) else {
-                return request.eventLoop.makeFailedFuture(Abort(.notFound, reason: "No regeneratable found with this id"))
+        let regeneratablePath = "Cache/Regeneratable/\(path.components(separatedBy: "/").last!).json"
+        return request.application.threadPool.runIfActive(eventLoop: request.eventLoop) {
+            return (FileManager.default.fileExists(atPath: path), FileManager.default.fileExists(atPath: regeneratablePath))
+        }.flatMap { (exists, regeneratableExists) in
+            if !exists {
+                guard regeneratableExists else {
+                    return request.eventLoop.makeFailedFuture(Abort(.notFound, reason: "No regeneratable found with this id"))
+                }
+                return ResponseUtils.readRegeneratable(request: request, path: regeneratablePath, as: StaticMap.self).flatMap { staticMap in
+                    // Compute base path for the regenerated static map
+                    var baseStaticMap = staticMap
+                    baseStaticMap.markers = nil
+                    baseStaticMap.polygons = nil
+                    baseStaticMap.circles = nil
+                    let basePath = baseStaticMap.path
+                    let baseExists = FileManager.default.fileExists(atPath: basePath)
+                    return self.generateStaticMapAndResponse(request: request, path: path, basePath: basePath, baseExists: baseExists, staticMap: staticMap)
+                }
             }
-            return ResponseUtils.readRegeneratable(request: request, path: regeneratablePath, as: StaticMap.self).flatMap { staicMap in
-                return self.generateStaticMapAndResponse(request: request, path: path, staticMap: staicMap)
-            }
-        }
-        let staticMap: StaticMap? = nil
-        return ResponseUtils.generateResponse(request: request, staticMap: staticMap, path: path).always { result in
-            if case .success = result {
-                request.application.logger.info("Served a pregenerate static map")
-            }
+            request.application.logger.info("Served static map (pregenerated)")
+            let staticMap: StaticMap? = nil
+            return ResponseUtils.generateResponse(request: request, staticMap: staticMap, path: path)
         }
     }
     
@@ -120,21 +156,20 @@ internal class StaticMapController {
         }
     }
     
-    private func generateStaticMapAndResponse(request: Request, path: String, staticMap: StaticMap) -> EventLoopFuture<Response> {
-        return generateStaticMap(request: request, path: path, staticMap: staticMap).flatMap {
+    private func generateStaticMapAndResponse(request: Request, path: String, basePath: String, baseExists: Bool, staticMap: StaticMap) -> EventLoopFuture<Response> {
+        return generateStaticMap(request: request, path: path, basePath: basePath, baseExists: baseExists, staticMap: staticMap).flatMap {
             return ResponseUtils.generateResponse(request: request, staticMap: staticMap, path: path)
         }
     }
     
-    private func generateStaticMap(request: Request, path: String, staticMap: StaticMap) -> EventLoopFuture<Void> {
+    private func generateStaticMap(request: Request, path: String, basePath: String, baseExists: Bool, staticMap: StaticMap) -> EventLoopFuture<Void> {
         var baseStaticMap = staticMap
         baseStaticMap.markers = nil
         baseStaticMap.polygons = nil
         baseStaticMap.circles = nil
-        let basePath = baseStaticMap.path
         
-        if !FileManager.default.fileExists(atPath: basePath) {
-            return loadBaseStaticMap(request: request, path: basePath, staticMap: baseStaticMap).flatMap {
+        if !baseExists {
+            return self.loadBaseStaticMap(request: request, path: basePath, staticMap: baseStaticMap).flatMap {
                 return self.generateFilledStaticMap(request: request, basePath: basePath, path: path, staticMap: staticMap)
             }
         } else {
@@ -166,7 +201,7 @@ internal class StaticMapController {
         let xOffsetRight = max(0, Int(ceil((Double(staticMap.width) - (256 - Double(point.xDelta))) / 256)))
         let yOffsetLeft = max(0, Int(ceil((Double(staticMap.height) - Double(point.yDelta)) / 256)))
         let yOffsetRight = max(0, Int(ceil((Double(staticMap.height) - (256 - Double(point.yDelta))) / 256)))
-        var futures = [EventLoopFuture<String>]()
+        var futures = [EventLoopFuture<TileController.TileResult>]()
         for xOffset in -xOffsetLeft...xOffsetRight {
             for yOffset in -yOffsetLeft...yOffsetRight {
                 futures.append(tileController.generateTile(
@@ -181,11 +216,14 @@ internal class StaticMapController {
             }
         }
 
-        return request.eventLoop.flatten(futures).flatMap( { tilePaths in
+        return request.eventLoop.flatten(futures).flatMap( { tileResults in
+            let cached = tileResults.filter { $0.cached }.count
+            let fetched = tileResults.count - cached
+            request.application.logger.info("Served static map (tiles: \(fetched) fetched, \(cached) cached)")
             return ImageUtils.generateBaseStaticMap(
                 request: request,
                 staticMap: staticMap,
-                tilePaths: tilePaths,
+                tilePaths: tileResults.map { $0.path },
                 path: path,
                 offsetX: Int(point.xDelta) + xOffsetLeft * 256,
                 offsetY: Int(point.yDelta) + yOffsetLeft * 256,
@@ -209,54 +247,121 @@ internal class StaticMapController {
             return request.eventLoop.future()
         }
         
-        var markerFutures = [EventLoopFuture<Void>]()
-        for marker in staticMap.markers ?? [] {
-            markerFutures.append(loadMarker(request: request, marker: marker))
-        }
-        return markerFutures.flatten(on: request.eventLoop).flatMap {
+        let markers = staticMap.markers ?? []
+        guard !markers.isEmpty else {
             return ImageUtils.generateStaticMap(request: request, staticMap: staticMap, basePath: basePath, path: path, sphericalMercator: self.sphericalMercator)
         }
-    }
-
-    private func loadMarker(request: Request, marker: Marker) -> EventLoopFuture<Void> {
-        var future = loadMarker(request: request, url: marker.url)
-        if let fallbackUrl = marker.fallbackUrl {
-            future = future.flatMapError { error in
-                self.loadMarker(request: request, url: fallbackUrl)
+        
+        // Pre-compute marker info for batched file checks
+        var markerInfos = [(url: String, path: String, domain: String, fallbackUrl: String?, fallbackPath: String?)]()
+        for marker in markers {
+            let url = marker.url
+            let markerPath: String
+            let domain: String
+            if url.starts(with: "http://") || url.starts(with: "https://") {
+                let markerHashed = url.persistentHash
+                let markerFormat = url.components(separatedBy: ".").last ?? "png"
+                markerPath = "Cache/Marker/\(markerHashed).\(markerFormat)"
+                domain = url.components(separatedBy: "//").last?.components(separatedBy: "/").first ?? "?"
+            } else {
+                markerPath = "Markers/\(url)"
+                domain = "local"
             }
-        }
-        return future
-    }
-
-    private func loadMarker(request: Request, url: String) -> EventLoopFuture<Void> {
-        if url.starts(with: "http://") || url.starts(with: "https://") {
-            guard URL(string: url) != nil else {
-                return request.eventLoop.future(error: Abort(.badRequest, reason: "Marker url is not valid: \(url)"))
-            }
-            let markerHashed = url.persistentHash
-            let markerFormat = url.components(separatedBy: ".").last ?? "png"
-            let path = "Cache/Marker/\(markerHashed).\(markerFormat)"
-            let domain = url.components(separatedBy: "//").last?.components(separatedBy: "/").first ?? "?"
-            guard !FileManager.default.fileExists(atPath: path) else {
-                statsController.markerServed(new: false, path: path, domain: domain)
-                return request.eventLoop.future()
-            }
-            return APIUtils.downloadFile(request: request, from: url, to: path, type: "image").always { result in
-                if case .success = result {
-                    self.statsController.markerServed(new: true, path: path, domain: domain)
+            
+            var fallbackPath: String? = nil
+            if let fallbackUrl = marker.fallbackUrl {
+                if fallbackUrl.starts(with: "http://") || fallbackUrl.starts(with: "https://") {
+                    let markerHashed = fallbackUrl.persistentHash
+                    let markerFormat = fallbackUrl.components(separatedBy: ".").last ?? "png"
+                    fallbackPath = "Cache/Marker/\(markerHashed).\(markerFormat)"
+                } else {
+                    fallbackPath = "Markers/\(fallbackUrl)"
                 }
-            }.flatMapError { error in
-                return request.eventLoop.makeFailedFuture(Abort(.badRequest, reason: "Failed to load marker: \(url) (\(error.localizedDescription))"))
             }
-        } else {
-            let path = "Markers/\(url)"
-            guard !path.contains("..") else {
-                return request.eventLoop.future(error: Abort(.badRequest, reason: "Path is not allowed to contain \"..\""))
+            markerInfos.append((url, markerPath, domain, marker.fallbackUrl, fallbackPath))
+        }
+        
+        // Batch all marker file existence checks in one threadPool call
+        let markerInfosCopy = markerInfos  // Copy for Sendable closure
+        return request.application.threadPool.runIfActive(eventLoop: request.eventLoop) {
+            return markerInfosCopy.map { info in
+                let exists = FileManager.default.fileExists(atPath: info.path)
+                let fallbackExists = info.fallbackPath.map { FileManager.default.fileExists(atPath: $0) } ?? false
+                return (exists, fallbackExists)
             }
-            guard FileManager.default.fileExists(atPath: path) else {
-                return request.eventLoop.future(error: Abort(.notFound, reason: "Marker not found"))
+        }.flatMap { existsResults in
+            var downloadFutures = [EventLoopFuture<Void>]()
+            for (index, info) in markerInfosCopy.enumerated() {
+                let (exists, fallbackExists) = existsResults[index]
+                
+                if exists {
+                    if info.url.starts(with: "http") {
+                        self.statsController.markerServed(new: false, path: info.path, domain: info.domain)
+                    }
+                    continue
+                }
+                
+                // Check if it's a local marker that doesn't exist
+                if !info.url.starts(with: "http://") && !info.url.starts(with: "https://") {
+                    if info.path.contains("..") {
+                        return request.eventLoop.makeFailedFuture(Abort(.badRequest, reason: "Path is not allowed to contain \"..\""))
+                    }
+                    // Try fallback if available
+                    if let fallbackUrl = info.fallbackUrl, let fallbackPath = info.fallbackPath {
+                        if fallbackExists {
+                            continue
+                        }
+                        if fallbackUrl.starts(with: "http://") || fallbackUrl.starts(with: "https://") {
+                            let domain = fallbackUrl.components(separatedBy: "//").last?.components(separatedBy: "/").first ?? "?"
+                            downloadFutures.append(
+                                APIUtils.downloadFile(request: request, from: fallbackUrl, to: fallbackPath, type: "image").always { result in
+                                    if case .success = result {
+                                        self.statsController.markerServed(new: true, path: fallbackPath, domain: domain)
+                                    }
+                                }.flatMapError { error in
+                                    request.eventLoop.makeFailedFuture(Abort(.badRequest, reason: "Failed to load marker: \(fallbackUrl) (\(error.localizedDescription))"))
+                                }
+                            )
+                            continue
+                        }
+                    }
+                    return request.eventLoop.makeFailedFuture(Abort(.notFound, reason: "Marker not found"))
+                }
+                
+                // Remote marker - download it
+                guard URL(string: info.url) != nil else {
+                    return request.eventLoop.makeFailedFuture(Abort(.badRequest, reason: "Marker url is not valid: \(info.url)"))
+                }
+                
+                let downloadFuture = APIUtils.downloadFile(request: request, from: info.url, to: info.path, type: "image").always { result in
+                    if case .success = result {
+                        self.statsController.markerServed(new: true, path: info.path, domain: info.domain)
+                    }
+                }.flatMapError { error -> EventLoopFuture<Void> in
+                    // Try fallback on failure
+                    if let fallbackUrl = info.fallbackUrl, let fallbackPath = info.fallbackPath {
+                        if fallbackExists {
+                            return request.eventLoop.future()
+                        }
+                        if fallbackUrl.starts(with: "http://") || fallbackUrl.starts(with: "https://") {
+                            let domain = fallbackUrl.components(separatedBy: "//").last?.components(separatedBy: "/").first ?? "?"
+                            return APIUtils.downloadFile(request: request, from: fallbackUrl, to: fallbackPath, type: "image").always { result in
+                                if case .success = result {
+                                    self.statsController.markerServed(new: true, path: fallbackPath, domain: domain)
+                                }
+                            }.flatMapError { fallbackError in
+                                request.eventLoop.makeFailedFuture(Abort(.badRequest, reason: "Failed to load marker: \(info.url) (\(error.localizedDescription))"))
+                            }
+                        }
+                    }
+                    return request.eventLoop.makeFailedFuture(Abort(.badRequest, reason: "Failed to load marker: \(info.url) (\(error.localizedDescription))"))
+                }
+                downloadFutures.append(downloadFuture)
             }
-            return request.eventLoop.future()
+            
+            return downloadFutures.flatten(on: request.eventLoop)
+        }.flatMap {
+            return ImageUtils.generateStaticMap(request: request, staticMap: staticMap, basePath: basePath, path: path, sphericalMercator: self.sphericalMercator)
         }
     }
 

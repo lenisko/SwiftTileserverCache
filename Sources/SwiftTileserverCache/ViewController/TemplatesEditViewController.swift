@@ -2,7 +2,7 @@ import Foundation
 import Vapor
 import Leaf
 
-internal class TemplatesEditViewController: ViewController {
+internal final class TemplatesEditViewController: ViewController, @unchecked Sendable {
 
     internal struct Context: ViewControllerContext {
         var pageId: String

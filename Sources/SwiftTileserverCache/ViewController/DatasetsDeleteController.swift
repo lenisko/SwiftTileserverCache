@@ -2,7 +2,7 @@ import Foundation
 import Vapor
 import Leaf
 
-internal class DatasetsDeleteViewController: ViewController {
+internal final class DatasetsDeleteViewController: ViewController, @unchecked Sendable {
 
     internal struct Context: ViewControllerContext {
         var pageId: String

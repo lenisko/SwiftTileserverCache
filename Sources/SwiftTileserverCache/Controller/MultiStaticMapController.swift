@@ -1,7 +1,7 @@
 import Vapor
 import Leaf
 
-internal class MultiStaticMapController {
+internal final class MultiStaticMapController: @unchecked Sendable {
 
     private let staticMapController: StaticMapController
     private let statsController: StatsController
@@ -50,39 +50,48 @@ internal class MultiStaticMapController {
 
     internal func handleRequest(request: Request, multiStaticMap: MultiStaticMap) -> EventLoopFuture<Response> {
         let path = multiStaticMap.path
-        if !FileManager.default.fileExists(atPath: path) {
-            return generateStaticMapAndResponse(request: request, path: path, multiStaticMap: multiStaticMap).always { result in
-                if case .success = result {
-                    request.application.logger.info("Served a generated multi-static map")
-                    self.statsController.staticMapServed(new: true, path: path, style: "multi")
+        let startTime = DispatchTime.now()
+        MetricsManager.shared.incrementInFlight(type: "multistaticmap")
+        return request.application.threadPool.runIfActive(eventLoop: request.eventLoop) {
+            return FileManager.default.fileExists(atPath: path)
+        }.flatMap { exists in
+            if !exists {
+                return self.generateStaticMapAndResponse(request: request, path: path, multiStaticMap: multiStaticMap).always { result in
+                    let duration = Double(DispatchTime.now().uptimeNanoseconds - startTime.uptimeNanoseconds) / 1_000_000_000
+                    if case .success = result {
+                        self.statsController.staticMapServed(new: true, path: path, style: "multi")
+                        MetricsManager.shared.recordRequest(type: "multistaticmap", style: "multi", cached: false, duration: duration)
+                    }
                 }
+            } else {
+                let duration = Double(DispatchTime.now().uptimeNanoseconds - startTime.uptimeNanoseconds) / 1_000_000_000
+                request.application.logger.info("Served multi-static map (cached)")
+                self.statsController.staticMapServed(new: false, path: path, style: "multi")
+                MetricsManager.shared.recordRequest(type: "multistaticmap", style: "multi", cached: true, duration: duration)
+                return ResponseUtils.generateResponse(request: request, staticMap: multiStaticMap, path: path)
             }
-        } else {
-            return ResponseUtils.generateResponse(request: request, staticMap: multiStaticMap, path: path).always { result in
-                if case .success = result {
-                    request.application.logger.info("Served a cached multi-static map")
-                    self.statsController.staticMapServed(new: false, path: path, style: "multi")
-                }
-            }
+        }.always { _ in
+            MetricsManager.shared.decrementInFlight(type: "multistaticmap")
         }
     }
 
     private func handleRequest(request: Request, id: String) -> EventLoopFuture<Response> {
         let path = "Cache/StaticMulti/\(id)"
-        guard FileManager.default.fileExists(atPath: path) else {
-            let regeneratablePath = "Cache/Regeneratable/\(path.components(separatedBy: "/").last!).json"
-            guard FileManager.default.fileExists(atPath: regeneratablePath) else {
-                return request.eventLoop.makeFailedFuture(Abort(.notFound, reason: "No regeneratable found with this id"))
+        let regeneratablePath = "Cache/Regeneratable/\(path.components(separatedBy: "/").last!).json"
+        return request.application.threadPool.runIfActive(eventLoop: request.eventLoop) {
+            return (FileManager.default.fileExists(atPath: path), FileManager.default.fileExists(atPath: regeneratablePath))
+        }.flatMap { (exists, regeneratableExists) in
+            if !exists {
+                guard regeneratableExists else {
+                    return request.eventLoop.makeFailedFuture(Abort(.notFound, reason: "No regeneratable found with this id"))
+                }
+                return ResponseUtils.readRegeneratable(request: request, path: regeneratablePath, as: MultiStaticMap.self).flatMap { multiStaticMap in
+                    return self.generateStaticMapAndResponse(request: request, path: path, multiStaticMap: multiStaticMap)
+                }
             }
-            return ResponseUtils.readRegeneratable(request: request, path: regeneratablePath, as: MultiStaticMap.self).flatMap { multiStaticMap in
-                return self.generateStaticMapAndResponse(request: request, path: path, multiStaticMap: multiStaticMap)
-            }
-        }
-        let staticMap: StaticMap? = nil
-        return ResponseUtils.generateResponse(request: request, staticMap: staticMap, path: path).always { result in
-            if case .success = result {
-                request.application.logger.info("Served a pregenerate multi-static map")
-            }
+            request.application.logger.info("Served multi-static map (pregenerated)")
+            let staticMap: StaticMap? = nil
+            return ResponseUtils.generateResponse(request: request, staticMap: staticMap, path: path)
         }
     }
 
@@ -115,6 +124,7 @@ internal class MultiStaticMapController {
         }
         return request.eventLoop.flatten(mapFutures).flatMap {
             return ImageUtils.generateMultiStaticMap(request: request, multiStaticMap: multiStaticMap, path: path).flatMap {
+                request.application.logger.info("Served multi-static map (generated, \(maps.count) maps)")
                 return ResponseUtils.generateResponse(request: request, staticMap: multiStaticMap, path: path)
             }
         }

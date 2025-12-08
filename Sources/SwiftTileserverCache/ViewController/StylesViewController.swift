@@ -2,7 +2,7 @@ import Foundation
 import Vapor
 import Leaf
 
-internal class StylesViewController: ViewController {
+internal final class StylesViewController: ViewController, @unchecked Sendable {
 
     internal struct Context: ViewControllerContext {
         var pageId: String
@@ -24,15 +24,20 @@ internal class StylesViewController: ViewController {
     }
 
     internal func render(request: Request) throws -> EventLoopFuture<View> {
-        return stylesController.getWithAnalysis(request: request).flatMap { (styles) in
+        let previewLat = self.previewLatitude
+        let previewLon = self.previewLongitude
+        return stylesController.getWithAnalysis(request: request).flatMap { [weak self] (styles) in
             let context = Context(
                 pageId: "styles",
                 pageName: "Styles",
                 styles: styles,
-                previewLatitude: self.previewLatitude,
-                previewLongitude: self.previewLongitude,
+                previewLatitude: previewLat,
+                previewLongitude: previewLon,
                 time: Date().timeIntervalSince1970
             )
+            guard let self = self else {
+                return request.eventLoop.makeFailedFuture(Abort(.internalServerError))
+            }
             return self.render(request: request, template: "Styles", context: context)
         }
     }

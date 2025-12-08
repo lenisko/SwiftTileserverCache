@@ -1,6 +1,6 @@
 import Foundation
 
-public struct StaticMap: Codable, Hashable, PersistentHashable {
+public struct StaticMap: Codable, Hashable, PersistentHashable, Sendable {
     public var style: String
     public var latitude: Double
     public var longitude: Double

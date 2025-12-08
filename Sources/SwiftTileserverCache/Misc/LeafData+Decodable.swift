@@ -2,7 +2,7 @@ import Foundation
 import Vapor
 import Leaf
 
-extension LeafData: Decodable {
+extension LeafData: @retroactive Decodable {
     public init(from decoder: Decoder) throws {
         let container = try decoder.singleValueContainer()
         if let int = try? container.decode(Int.self) {

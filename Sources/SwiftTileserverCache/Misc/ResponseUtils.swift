@@ -1,34 +1,36 @@
 import Vapor
 
-internal class ResponseUtils<T> where T: Codable {
+internal class ResponseUtils<T> where T: Codable & Sendable {
 
     internal static func generateResponse(request: Request, staticMap: T?, path: String) -> EventLoopFuture<Response> {
-        let response: Response
-        let regeneratableFuture: EventLoopFuture<Void>?
         if (try? request.query.get(Bool.self, at: "pregenerate")) ?? false {
+            var regeneratableFuture: EventLoopFuture<Void>? = nil
             if let staticMap = staticMap, (try? request.query.get(Bool.self, at: "regeneratable")) ?? false {
-                let path = "Cache/Regeneratable/\(path.components(separatedBy: "/").last!).json"
-                if !FileManager.default.fileExists(atPath: path) {
-                    regeneratableFuture = storeRegeneratable(request: request, staticMap: staticMap, path: path)
-                } else {
-                    regeneratableFuture = nil
+                let regeneratablePath = "Cache/Regeneratable/\(path.components(separatedBy: "/").last!).json"
+                if !FileManager.default.fileExists(atPath: regeneratablePath) {
+                    regeneratableFuture = storeRegeneratable(request: request, staticMap: staticMap, path: regeneratablePath)
                 }
-            } else {
-                regeneratableFuture = nil
             }
-            response = Response(body: .init(string: path.components(separatedBy: "/").last!))
+            let response = Response(body: .init(string: path.components(separatedBy: "/").last!))
             response.headers.add(name: .contentType, value: "text/plain")
-        } else {
-            regeneratableFuture = nil
-            response = request.fileio.streamFile(at: path)
-            response.headers.add(name: .cacheControl, value: "max-age=604800, must-revalidate")
+            if let regeneratableFuture = regeneratableFuture {
+                return regeneratableFuture.map { response }
+            }
+            return request.eventLoop.future(response)
         }
-        if let regeneratableFuture = regeneratableFuture {
-            return regeneratableFuture.flatMap {
-                return request.eventLoop.future(response)
+        
+        // Use async file streaming to properly manage file handles
+        let promise = request.eventLoop.makePromise(of: Response.self)
+        Task {
+            do {
+                let response = try await request.fileio.asyncStreamFile(at: path)
+                response.headers.add(name: .cacheControl, value: "max-age=604800, must-revalidate")
+                promise.succeed(response)
+            } catch {
+                promise.fail(error)
             }
         }
-        return request.eventLoop.future(response)
+        return promise.futureResult
     }
 
     internal static func storeRegeneratable(request: Request, staticMap: T, path: String) -> EventLoopFuture<Void> {

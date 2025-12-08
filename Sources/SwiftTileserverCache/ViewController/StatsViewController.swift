@@ -2,7 +2,7 @@ import Foundation
 import Vapor
 import Leaf
 
-internal class StatsViewController: ViewController {
+internal final class StatsViewController: ViewController, @unchecked Sendable {
 
     internal struct Context: ViewControllerContext {
         struct Ratio: Encodable {
@@ -23,23 +23,32 @@ internal class StatsViewController: ViewController {
     }
 
     internal func render(request: Request) -> EventLoopFuture<View> {
-        let tileHitRatios = statsController.getTileStats().map { (ratio) -> Context.Ratio in
-            return .init(key: ratio.key, value: ratio.value.displayValue)
+        let promise = request.eventLoop.makePromise(of: View.self)
+        Task {
+            let tileHitRatios = await statsController.getTileStats().map { (ratio) -> Context.Ratio in
+                return .init(key: ratio.key, value: ratio.value.displayValue)
+            }
+            let staticMapHitRatios = await statsController.getStaticMapStats().map { (ratio) -> Context.Ratio in
+                return .init(key: ratio.key, value: ratio.value.displayValue)
+            }
+            let markerHitRatios = await statsController.getMarkerStats().map { (ratio) -> Context.Ratio in
+                return .init(key: ratio.key, value: ratio.value.displayValue)
+            }
+            let context = Context(
+                pageId: "stats",
+                pageName: "Stats",
+                tileHitRatios: tileHitRatios,
+                staticMapHitRatios: staticMapHitRatios,
+                markerHitRatios: markerHitRatios
+            )
+            do {
+                let view = try await self.render(request: request, template: "Stats", context: context).get()
+                promise.succeed(view)
+            } catch {
+                promise.fail(error)
+            }
         }
-        let staticMapHitRatios = statsController.getStaticMapStats().map { (ratio) -> Context.Ratio in
-            return .init(key: ratio.key, value: ratio.value.displayValue)
-        }
-        let markerHitRatios = statsController.getMarkerStats().map { (ratio) -> Context.Ratio in
-            return .init(key: ratio.key, value: ratio.value.displayValue)
-        }
-        let context = Context(
-            pageId: "stats",
-            pageName: "Stats",
-            tileHitRatios: tileHitRatios,
-            staticMapHitRatios: staticMapHitRatios,
-            markerHitRatios: markerHitRatios
-        )
-        return self.render(request: request, template: "Stats", context: context)
+        return promise.futureResult
     }
 
 }

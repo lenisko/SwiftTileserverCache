@@ -152,8 +152,8 @@ public class ImageUtils {
             ]
         }
         
-        var markerArguments = [String]()
-        var markerPaths = [String]()
+        // Pre-compute marker data that doesn't need file checks
+        var markerData = [(marker: Marker, realOffset: (x: Int, y: Int), xPrefix: String, yPrefix: String)]()
         for marker in staticMap.markers ?? [] {
             let realOffset = getRealOffset(
                 at: Coordinate(latitude: marker.latitude, longitude: marker.longitude),
@@ -170,48 +170,43 @@ public class ImageUtils {
                 continue
             }
 
-            let realOffsetXPrefix: String
-            if realOffset.x >= 0 {
-                realOffsetXPrefix = "+"
-            } else {
-                realOffsetXPrefix = ""
-            }
-            let realOffsetYPrefix: String
-            if realOffset.y >= 0 {
-                realOffsetYPrefix = "+"
-            } else {
-                realOffsetYPrefix = ""
-            }
-
-            var markerPath: String
-            if marker.url.starts(with: "http://") || marker.url.starts(with: "https://") {
-                let markerHashed = marker.url.persistentHash
-                let markerFormat = marker.url.components(separatedBy: ".").last ?? "png"
-                markerPath = "Cache/Marker/\(markerHashed).\(markerFormat)"
-            } else {
-                markerPath = "Markers/\(marker.url)"
-            }
-            if let fallbackUrl = marker.fallbackUrl, !FileManager.default.fileExists(atPath: markerPath) {
-                if fallbackUrl.starts(with: "http://") || fallbackUrl.starts(with: "https://") {
-                    let markerHashed = fallbackUrl.persistentHash
-                    let markerFormat = fallbackUrl.components(separatedBy: ".").last ?? "png"
-                    markerPath = "Cache/Marker/\(markerHashed).\(markerFormat)"
-                } else {
-                    markerPath = "Markers/\(fallbackUrl)"
-                }
-            }
-
-            markerPaths.append(markerPath)
-            markerArguments += [
-                "(", markerPath, "-resize", "\(marker.width * UInt16(staticMap.scale))x\(marker.height * UInt16(staticMap.scale))", ")",
-                "-gravity", "Center",
-                "-geometry", "\(realOffsetXPrefix)\(realOffset.x)\(realOffsetYPrefix)\(realOffset.y)",
-                "-composite"
-            ]
-            
+            let xPrefix = realOffset.x >= 0 ? "+" : ""
+            let yPrefix = realOffset.y >= 0 ? "+" : ""
+            markerData.append((marker, realOffset, xPrefix, yPrefix))
         }
         
         return request.application.threadPool.runIfActive(eventLoop: request.eventLoop) {
+            // Build marker arguments on threadPool (includes fileExists check for fallback)
+            var markerArguments = [String]()
+            var markerPaths = [String]()
+            for (marker, realOffset, xPrefix, yPrefix) in markerData {
+                var markerPath: String
+                if marker.url.starts(with: "http://") || marker.url.starts(with: "https://") {
+                    let markerHashed = marker.url.persistentHash
+                    let markerFormat = marker.url.components(separatedBy: ".").last ?? "png"
+                    markerPath = "Cache/Marker/\(markerHashed).\(markerFormat)"
+                } else {
+                    markerPath = "Markers/\(marker.url)"
+                }
+                if let fallbackUrl = marker.fallbackUrl, !FileManager.default.fileExists(atPath: markerPath) {
+                    if fallbackUrl.starts(with: "http://") || fallbackUrl.starts(with: "https://") {
+                        let markerHashed = fallbackUrl.persistentHash
+                        let markerFormat = fallbackUrl.components(separatedBy: ".").last ?? "png"
+                        markerPath = "Cache/Marker/\(markerHashed).\(markerFormat)"
+                    } else {
+                        markerPath = "Markers/\(fallbackUrl)"
+                    }
+                }
+
+                markerPaths.append(markerPath)
+                markerArguments += [
+                    "(", markerPath, "-resize", "\(marker.width * UInt16(staticMap.scale))x\(marker.height * UInt16(staticMap.scale))", ")",
+                    "-gravity", "Center",
+                    "-geometry", "\(xPrefix)\(realOffset.x)\(yPrefix)\(realOffset.y)",
+                    "-composite"
+                ]
+            }
+            
             do {
                 let args = [basePath] +
                     polygonArguments +
@@ -296,15 +291,11 @@ public class ImageUtils {
             realOffsetX = 0
             realOffsetY = 0
         } else {
-            if let px1 = sphericalMercator.px(coordinate: Coordinate(latitude: center.latitude, longitude: center.longitude), zoom: 20),
-                let px2 = sphericalMercator.px(coordinate: Coordinate(latitude: at.latitude, longitude: at.longitude), zoom: 20) {
-                let pxScale = pow(2, Double(zoom) - 20)
-                realOffsetX = Int((px2.x - px1.x) * Double(pxScale) * Double(scale))
-                realOffsetY = Int((px2.y - px1.y) * Double(pxScale) * Double(scale))
-            } else {
-                realOffsetX = 0
-                realOffsetY = 0
-            }
+            let px1 = sphericalMercator.px(coordinate: Coordinate(latitude: center.latitude, longitude: center.longitude), zoom: 20)
+            let px2 = sphericalMercator.px(coordinate: Coordinate(latitude: at.latitude, longitude: at.longitude), zoom: 20)
+            let pxScale = pow(2, Double(zoom) - 20)
+            realOffsetX = Int((px2.x - px1.x) * pxScale * Double(scale))
+            realOffsetY = Int((px2.y - px1.y) * pxScale * Double(scale))
         }
         return (realOffsetX + (Int(extraX) * Int(scale)), realOffsetY + (Int(extraY) * Int(scale)))
     }

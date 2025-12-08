@@ -1,6 +1,6 @@
 import Vapor
 
-internal class FontsController {
+internal final class FontsController: @unchecked Sendable {
 
     struct SaveFont: Content {
         var file: File

@@ -1,11 +1,11 @@
 import Foundation
 
-public struct MultiStaticMap: Codable, Hashable, PersistentHashable {
-    public struct DirectionedMultiStaticMap: Codable, Hashable {
+public struct MultiStaticMap: Codable, Hashable, PersistentHashable, Sendable {
+    public struct DirectionedMultiStaticMap: Codable, Hashable, Sendable {
         public var direction: CombineDirection
         public var maps: [DirectionedStaticMap]
     }
-    public struct DirectionedStaticMap: Codable, Hashable {
+    public struct DirectionedStaticMap: Codable, Hashable, Sendable {
         public var direction: CombineDirection
         public var map: StaticMap
     }

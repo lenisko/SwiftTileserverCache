@@ -2,7 +2,7 @@ import Foundation
 import Vapor
 import Leaf
 
-internal class StylesDeleteLocalViewController: ViewController {
+internal final class StylesDeleteLocalViewController: ViewController, @unchecked Sendable {
 
     internal struct Context: ViewControllerContext {
         var pageId: String

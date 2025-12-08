@@ -2,7 +2,7 @@ import Vapor
 import Leaf
 import ZIPFoundation
 
-internal class StylesController {
+internal final class StylesController: @unchecked Sendable {
 
     struct SaveStyleFiles: Content {
         var id: String
@@ -46,7 +46,10 @@ internal class StylesController {
     }
     
     internal func getWithAnalysis(request: Request) -> EventLoopFuture<[Style]> {
-        return get(request: request).flatMap({ styles in
+        return get(request: request).flatMap({ [weak self] styles in
+            guard let self = self else {
+                return request.eventLoop.future(styles)
+            }
             let analysisFutures = styles.filter({$0.external != true}).map({ style in
                 return self.analyse(request: request, id: style.id).map({ analysis in
                     return (id: style.id, analysis: analysis)
@@ -63,8 +66,14 @@ internal class StylesController {
     }
 
     internal func analyse(request: Request, id: String) -> EventLoopFuture<Style.Analysis> {
-        return analyseUsage(request: request, id: id).flatMap({ usage in
-            return self.analyseAvailableIcons(request: request, id: id).flatMapThrowing({ icons in
+        return analyseUsage(request: request, id: id).flatMap({ [weak self] usage in
+            guard let self = self else {
+                return request.eventLoop.future(.init(missingFonts: [], missingIcons: []))
+            }
+            return self.analyseAvailableIcons(request: request, id: id).flatMapThrowing({ [weak self] icons in
+                guard let self = self else {
+                    return .init(missingFonts: [], missingIcons: [])
+                }
                 let fonts = try self.fontsController.getFonts()
                 let missingIcons = usage.icons.filter({!icons.contains($0)})
                 let missingFonts = usage.fonts.filter({!fonts.contains($0)})

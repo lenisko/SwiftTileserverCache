@@ -1,6 +1,14 @@
 import Vapor
 import Leaf
 
+/// Storage keys to prevent deallocation of background services
+private struct FileToucherKey: StorageKey {
+    typealias Value = FileToucher
+}
+private struct StatsControllerKey: StorageKey {
+    typealias Value = StatsController
+}
+
 func routes(_ app: Application) throws {
     guard let tileServerURL = Environment.get("TILE_SERVER_URL") else {
         app.logger.critical("TILE_SERVER_URL enviroment not set. Exiting...")
@@ -22,7 +30,12 @@ func routes(_ app: Application) throws {
         app.routes.defaultMaxBodySize = ByteCount(stringLiteral: maxBodySize)
     }
 
-    let statsController = StatsController(fileToucher: FileToucher())
+    let fileToucher = FileToucher()
+    app.storage[FileToucherKey.self] = fileToucher
+    Task { await fileToucher.start() }
+    
+    let statsController = StatsController(fileToucher: fileToucher)
+    app.storage[StatsControllerKey.self] = statsController
 
     let fontsController = FontsController(folder: "TileServer/Fonts", tempFolder: "Temp")
     let stylesController = StylesController(tileServerURL: tileServerURL, externalStyles: externalStyles, folder: "TileServer/Styles", fontsController: fontsController)

@@ -1,10 +1,30 @@
 # SwiftTileserverCache
 
+## Changelog
+
+Summary of changes from base repository:
+
+### Features
+- **Prometheus metrics** - Full observability via `/metrics` endpoint
+- **ARM64 support** - Native builds for arm64/aarch64 architecture
+- **GitHub Actions CI** - Automated Docker image builds on push to master
+- **Grafana dashboard** - Pre-built dashboard for metrics visualization
+- **Improved logging** - Less spam, more useful data
+- **Swift 6.0** - Upgraded to latest Swift version
+
+### Fixes
+- **Memory optimizations** - Reduced memory usage and fixed leaks
+- **FileToucher stability** - Fixed crashes and improved queue handling
+- **Cache cleaner** - Fixed broken cache image cleanup
+- **Dockerfile** - Updated for Swift 6.0 and arm64 compatibility
+
 ## Installing
+
+Pre-built Docker images are available at `ghcr.io/lenisko/swifttileservercache:latest` for both amd64 and arm64 architectures.
 
 - Install Docker
 - Create a new folder to store the yml file in and change into it: `mkdir TileServer && cd TileServer`
-- Load the yml: `wget https://raw.githubusercontent.com/123FLO321/SwiftTileserverCache/master/docker-compose.yml`
+- Load the yml: `wget https://raw.githubusercontent.com/lenisko/SwiftTileserverCache/master/docker-compose.yml`
 - Edit the docker-compose.yml file if you want to change defaults. Default will work fine.
 - Create a new folder to store TileServer data in and chagne into it: `mkdir TileServer && cd TileServer`
 - Get Download command from https://openmaptiles.com/downloads/planet/ for your region.
@@ -29,6 +49,8 @@
     - `GET /multistaticmap/:template` (Template Enviroment parsed from URL Parameters. Parameters ending in `json` will be parsed as json. Multiple instances of same Parameter will be parsed as array)
     - `POST /multistaticmap/:template` (Template Enviroment in JSON Format Format as POST body)
     - `GET /multistaticmap/pregenerated/:id` (Get image from pregenerated map. Use GET or POST to /staticmap with pregenerate=true as URL Parameter to get pregenerate the map)
+- Metrics:
+    - `GET /metrics` (Prometheus metrics endpoint)
 
 ### Style
 Get a list of styles by visiting `/styles`
@@ -281,3 +303,29 @@ View: `GET https://tileserverurl/staticmap/pregenerated/{id}`
 ```
 `GET https://tileserverurl/staticmap/pokemon?id=201&lat=47.263416&lon=11.400512&form=5`
 ![staticmap-template response](.exampleimages/staticmaptemplate.png)
+
+
+## Metrics
+
+The `/metrics` endpoint exposes Prometheus-compatible metrics for monitoring:
+
+| Metric | Type | Description |
+|--------|------|-------------|
+| `tileserver_uptime_seconds` | Gauge | Process uptime in seconds |
+| `tileserver_memory_resident_bytes` | Gauge | Resident memory usage |
+| `tileserver_memory_virtual_bytes` | Gauge | Virtual memory usage |
+| `tileserver_requests_total` | Counter | Total requests by type, style, and cache status |
+| `tileserver_requests_in_flight` | Gauge | Currently processing requests by type |
+| `tileserver_request_duration_seconds` | Histogram | Request duration distribution |
+| `tileserver_cache_hits_total` | Counter | Cache hits by request type |
+| `tileserver_cache_misses_total` | Counter | Cache misses by request type |
+| `tileserver_errors_total` | Counter | Errors by type and reason |
+| `tileserver_http_client_requests_total` | Counter | Outgoing HTTP requests by host |
+| `tileserver_http_client_duration_seconds` | Histogram | Outgoing HTTP request duration |
+| `tileserver_filetoucher_queue_size` | Gauge | File toucher queue size |
+
+A Grafana dashboard is included in the main directory.
+
+### Notes
+
+Thanks to @123FLO321 for years of SwiftTileserverCache development. And @3nprob for node-fontnik with arm64 support.

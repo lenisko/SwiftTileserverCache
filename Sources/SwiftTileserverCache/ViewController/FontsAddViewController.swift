@@ -2,7 +2,7 @@ import Foundation
 import Vapor
 import Leaf
 
-internal class FontsAddViewController: ViewController {
+internal final class FontsAddViewController: ViewController, @unchecked Sendable {
 
     internal struct Context: ViewControllerContext {
         var pageId: String

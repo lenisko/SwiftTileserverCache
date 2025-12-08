@@ -1,66 +1,67 @@
 import Vapor
 import Leaf
 
-internal class StatsController {
+internal actor StatsController {
 
     private let fileToucher: FileToucher
-
-    private let tileHitRatioLock = NSLock()
-    private var tileHitRatios = [String: HitRatio]()
-    private let staticMapHitRatioLock = NSLock()
-    private var staticMapHitRatios = [String: HitRatio]()
-    private let markerHitRatioLock = NSLock()
-    private var markerHitRatios = [String: HitRatio]()
+    
+    private var tileHitRatios: [String: HitRatio] = [:]
+    private var staticMapHitRatios: [String: HitRatio] = [:]
+    private var markerHitRatios: [String: HitRatio] = [:]
 
     internal init(fileToucher: FileToucher) {
         self.fileToucher = fileToucher
     }
 
-    // MARK: - Stats
+    // MARK: - Stats (nonisolated for fire-and-forget from sync contexts)
 
-    internal func tileServed(new: Bool, path: String, style: String) {
+    nonisolated internal func tileServed(new: Bool, path: String, style: String) {
         if !new { fileToucher.touch(fileName: path) }
-        tileHitRatioLock.lock()
+        Task { await recordTile(new: new, style: style) }
+    }
+
+    nonisolated internal func staticMapServed(new: Bool, path: String, style: String) {
+        if !new { fileToucher.touch(fileName: path) }
+        Task { await recordStaticMap(new: new, style: style) }
+    }
+
+    nonisolated internal func markerServed(new: Bool, path: String, domain: String) {
+        if !new { fileToucher.touch(fileName: path) }
+        Task { await recordMarker(new: new, domain: domain) }
+    }
+
+    // MARK: - Isolated recording
+
+    private func recordTile(new: Bool, style: String) {
         if tileHitRatios[style] == nil { tileHitRatios[style] = HitRatio() }
         tileHitRatios[style]!.served(new: new)
-        tileHitRatioLock.unlock()
+        MetricsManager.shared.recordTileRequest(style: style, cached: !new)
     }
 
-    internal func staticMapServed(new: Bool, path: String, style: String) {
-        if !new { fileToucher.touch(fileName: path) }
-        staticMapHitRatioLock.lock()
+    private func recordStaticMap(new: Bool, style: String) {
         if staticMapHitRatios[style] == nil { staticMapHitRatios[style] = HitRatio() }
         staticMapHitRatios[style]!.served(new: new)
-        staticMapHitRatioLock.unlock()
+        MetricsManager.shared.recordStaticMapRequest(style: style, cached: !new)
     }
 
-    internal func markerServed(new: Bool, path: String, domain: String) {
-        if !new { fileToucher.touch(fileName: path) }
-        markerHitRatioLock.lock()
+    private func recordMarker(new: Bool, domain: String) {
         if markerHitRatios[domain] == nil { markerHitRatios[domain] = HitRatio() }
         markerHitRatios[domain]!.served(new: new)
-        markerHitRatioLock.unlock()
+        MetricsManager.shared.recordMarkerRequest(domain: domain, cached: !new)
     }
 
-    internal func getTileStats() -> [String : HitRatio] {
-        self.tileHitRatioLock.lock()
-        let tileHitRatios = self.tileHitRatios
-        self.tileHitRatioLock.unlock()
-        return tileHitRatios
+    // MARK: - Getters
+
+    internal func getTileStats() -> [String: HitRatio] {
+        tileHitRatios
     }
 
-    internal func getStaticMapStats() -> [String : HitRatio] {
-        self.staticMapHitRatioLock.lock()
-        let staticMapHitRatios = self.staticMapHitRatios
-        self.staticMapHitRatioLock.unlock()
-        return staticMapHitRatios
+    internal func getStaticMapStats() -> [String: HitRatio] {
+        staticMapHitRatios
     }
 
-    internal func getMarkerStats() -> [String : HitRatio] {
-        self.markerHitRatioLock.lock()
-        let markerHitRatios = self.markerHitRatios
-        self.markerHitRatioLock.unlock()
-        return markerHitRatios
+    internal func getMarkerStats() -> [String: HitRatio] {
+        markerHitRatios
     }
 
 }

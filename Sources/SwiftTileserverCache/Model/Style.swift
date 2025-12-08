@@ -2,7 +2,7 @@ import Vapor
 
 public struct Style: Content {
     
-    public struct Analysis: Codable {
+    public struct Analysis: Codable, Sendable {
         var missingFonts: [String]
         var missingIcons: [String]
     }
