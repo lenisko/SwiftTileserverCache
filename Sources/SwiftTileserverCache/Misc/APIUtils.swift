@@ -49,22 +49,23 @@ public class APIUtils {
         }
     }
     
-    public static func loadJSON<T: Decodable>(request: Request, from: String) -> EventLoopFuture<T> {
+    public static func loadJSON<T: Decodable & Sendable>(request: Request, from: String) -> EventLoopFuture<T> {
         let headers = HTTPHeaders([("User-Agent", "TileserverCache")])
         return request.client.get(URI(string: from), headers: headers).flatMap { response in
-            let errorReason: String
-            if response.status.code >= 200 && response.status.code < 300 {
-                do {
-                    let json = try response.content.decode(T.self)
-                    return request.eventLoop.future(json)
-                } catch {
-                    errorReason = "Failed to parse JSON"
-                }
-            } else {
-                errorReason = "Failed to load file. Got \(response.status.code)"
+            guard response.status.code >= 200 && response.status.code < 300 else {
+                let errorReason = "Failed to load file. Got \(response.status.code)"
+                request.application.logger.error(.init(stringLiteral: errorReason))
+                return request.eventLoop.future(error: Abort(.internalServerError, reason: errorReason))
             }
-            request.application.logger.error(.init(stringLiteral: errorReason))
-            return request.eventLoop.future(error: Abort(.internalServerError, reason: errorReason))
+            
+            do {
+                let json = try response.content.decode(T.self)
+                return request.eventLoop.future(json)
+            } catch {
+                let errorReason = "Failed to parse JSON: \(error.localizedDescription)"
+                request.application.logger.error(.init(stringLiteral: errorReason))
+                return request.eventLoop.future(error: Abort(.internalServerError, reason: errorReason))
+            }
         }
     }
 }
