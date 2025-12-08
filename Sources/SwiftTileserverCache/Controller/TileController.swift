@@ -74,9 +74,17 @@ internal final class TileController: @unchecked Sendable {
     }
 
     private func generateResponse(request: Request, path: String) -> EventLoopFuture<Response> {
-        let response = request.fileio.streamFile(at: path)
-        response.headers.add(name: .cacheControl, value: "max-age=604800, must-revalidate")
-        return request.eventLoop.future(response)
+        let promise = request.eventLoop.makePromise(of: Response.self)
+        Task {
+            do {
+                let response = try await request.fileio.asyncStreamFile(at: path)
+                response.headers.add(name: .cacheControl, value: "max-age=604800, must-revalidate")
+                promise.succeed(response)
+            } catch {
+                promise.fail(error)
+            }
+        }
+        return promise.futureResult
     }
 
 }
