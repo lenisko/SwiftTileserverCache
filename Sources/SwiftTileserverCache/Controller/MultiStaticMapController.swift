@@ -50,18 +50,23 @@ internal final class MultiStaticMapController: @unchecked Sendable {
 
     internal func handleRequest(request: Request, multiStaticMap: MultiStaticMap) -> EventLoopFuture<Response> {
         let path = multiStaticMap.path
+        let startTime = DispatchTime.now()
         return request.application.threadPool.runIfActive(eventLoop: request.eventLoop) {
             return FileManager.default.fileExists(atPath: path)
         }.flatMap { exists in
             if !exists {
                 return self.generateStaticMapAndResponse(request: request, path: path, multiStaticMap: multiStaticMap).always { result in
+                    let duration = Double(DispatchTime.now().uptimeNanoseconds - startTime.uptimeNanoseconds) / 1_000_000_000
                     if case .success = result {
                         self.statsController.staticMapServed(new: true, path: path, style: "multi")
+                        MetricsManager.shared.recordRequest(type: "multistaticmap", style: "multi", cached: false, duration: duration)
                     }
                 }
             } else {
+                let duration = Double(DispatchTime.now().uptimeNanoseconds - startTime.uptimeNanoseconds) / 1_000_000_000
                 request.application.logger.info("Served multi-static map (cached)")
                 self.statsController.staticMapServed(new: false, path: path, style: "multi")
+                MetricsManager.shared.recordRequest(type: "multistaticmap", style: "multi", cached: true, duration: duration)
                 return ResponseUtils.generateResponse(request: request, staticMap: multiStaticMap, path: path)
             }
         }

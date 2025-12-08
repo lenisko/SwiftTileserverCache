@@ -7,16 +7,18 @@ public class APIUtils {
     
     public static func downloadFile(request: Request, from: String, to: String, type: String?) -> EventLoopFuture<Void> {
         let headers = HTTPHeaders([("User-Agent", "TileserverCache")])
+        let host = URL(string: from)?.host ?? "unknown"
+        let startTime = DispatchTime.now()
+        MetricsManager.shared.recordHttpClientRequest(host: host)
+        
         return request.client.get(URI(string: from), headers: headers).flatMap { response in
-            // Always consume the response body to prevent buffer leaks
-            defer {
-                // Response body is automatically released when response goes out of scope
-                // but we ensure we don't hold references
-            }
-            
+            let duration = Double(DispatchTime.now().uptimeNanoseconds - startTime.uptimeNanoseconds) / 1_000_000_000
+            MetricsManager.shared.recordHttpClientDuration(host: host, duration: duration)
             guard response.status.code >= 200 && response.status.code < 300 else {
                 let errorReason = "Failed to load file. Got \(response.status.code)"
                 request.application.logger.error(.init(stringLiteral: errorReason))
+                MetricsManager.shared.recordHttpClientError(host: host)
+                MetricsManager.shared.recordError(type: "http_client", reason: "status_\(response.status.code)")
                 return request.eventLoop.future(error: Abort(.internalServerError, reason: errorReason))
             }
             

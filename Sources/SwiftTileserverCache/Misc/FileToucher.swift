@@ -28,6 +28,9 @@ public actor FileToucher {
     }
 
     private func runOnce() {
+        // Report queue size to metrics before processing
+        MetricsManager.shared.setFileToucherQueueSize(queue.count)
+        
         let currentQueue = queue
         queue.removeAll(keepingCapacity: false)
 

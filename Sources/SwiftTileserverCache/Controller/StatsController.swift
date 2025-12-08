@@ -35,16 +35,19 @@ internal actor StatsController {
     private func recordTile(new: Bool, style: String) {
         if tileHitRatios[style] == nil { tileHitRatios[style] = HitRatio() }
         tileHitRatios[style]!.served(new: new)
+        MetricsManager.shared.recordTileRequest(style: style, cached: !new)
     }
 
     private func recordStaticMap(new: Bool, style: String) {
         if staticMapHitRatios[style] == nil { staticMapHitRatios[style] = HitRatio() }
         staticMapHitRatios[style]!.served(new: new)
+        MetricsManager.shared.recordStaticMapRequest(style: style, cached: !new)
     }
 
     private func recordMarker(new: Bool, domain: String) {
         if markerHitRatios[domain] == nil { markerHitRatios[domain] = HitRatio() }
         markerHitRatios[domain]!.served(new: new)
+        MetricsManager.shared.recordMarkerRequest(domain: domain, cached: !new)
     }
 
     // MARK: - Getters

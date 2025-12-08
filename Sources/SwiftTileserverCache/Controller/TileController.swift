@@ -67,8 +67,11 @@ internal final class TileController: @unchecked Sendable {
     }
 
     private func generateTileAndResponse(request: Request, style: String, z: Int, x: Int, y: Int, scale: UInt8, format: ImageFormat) -> EventLoopFuture<Response> {
+        let startTime = DispatchTime.now()
         return generateTile(request: request, style: style, z: z, x: x, y: y, scale: scale, format: format).flatMap { result in
+            let duration = Double(DispatchTime.now().uptimeNanoseconds - startTime.uptimeNanoseconds) / 1_000_000_000
             request.application.logger.info("Served tile (cached: \(result.cached))")
+            MetricsManager.shared.recordRequest(type: "tile", style: style, cached: result.cached, duration: duration)
             return self.generateResponse(request: request, path: result.path)
         }
     }

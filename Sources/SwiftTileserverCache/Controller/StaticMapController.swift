@@ -77,6 +77,7 @@ internal final class StaticMapController: @unchecked Sendable {
     
     internal func handleRequest(request: Request, staticMap: StaticMap) -> EventLoopFuture<Response> {
         let path = staticMap.path
+        let startTime = DispatchTime.now()
         
         // Compute base path upfront for batched file checks
         var baseStaticMap = staticMap
@@ -91,13 +92,17 @@ internal final class StaticMapController: @unchecked Sendable {
         }.flatMap { (exists, baseExists) in
             if !exists {
                 return self.generateStaticMapAndResponse(request: request, path: path, basePath: basePath, baseExists: baseExists, staticMap: staticMap).always { result in
+                    let duration = Double(DispatchTime.now().uptimeNanoseconds - startTime.uptimeNanoseconds) / 1_000_000_000
                     if case .success = result {
                         self.statsController.staticMapServed(new: true, path: path, style: staticMap.style)
+                        MetricsManager.shared.recordRequest(type: "staticmap", style: staticMap.style, cached: false, duration: duration)
                     }
                 }
             } else {
+                let duration = Double(DispatchTime.now().uptimeNanoseconds - startTime.uptimeNanoseconds) / 1_000_000_000
                 request.application.logger.info("Served static map (cached)")
                 self.statsController.staticMapServed(new: false, path: path, style: staticMap.style)
+                MetricsManager.shared.recordRequest(type: "staticmap", style: staticMap.style, cached: true, duration: duration)
                 return ResponseUtils.generateResponse(request: request, staticMap: staticMap, path: path)
             }
         }
