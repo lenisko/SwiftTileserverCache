@@ -78,6 +78,7 @@ internal final class StaticMapController: @unchecked Sendable {
     internal func handleRequest(request: Request, staticMap: StaticMap) -> EventLoopFuture<Response> {
         let path = staticMap.path
         let startTime = DispatchTime.now()
+        MetricsManager.shared.incrementInFlight(type: "staticmap")
         
         // Compute base path upfront for batched file checks
         var baseStaticMap = staticMap
@@ -105,6 +106,8 @@ internal final class StaticMapController: @unchecked Sendable {
                 MetricsManager.shared.recordRequest(type: "staticmap", style: staticMap.style, cached: true, duration: duration)
                 return ResponseUtils.generateResponse(request: request, staticMap: staticMap, path: path)
             }
+        }.always { _ in
+            MetricsManager.shared.decrementInFlight(type: "staticmap")
         }
     }
     

@@ -51,6 +51,7 @@ internal final class MultiStaticMapController: @unchecked Sendable {
     internal func handleRequest(request: Request, multiStaticMap: MultiStaticMap) -> EventLoopFuture<Response> {
         let path = multiStaticMap.path
         let startTime = DispatchTime.now()
+        MetricsManager.shared.incrementInFlight(type: "multistaticmap")
         return request.application.threadPool.runIfActive(eventLoop: request.eventLoop) {
             return FileManager.default.fileExists(atPath: path)
         }.flatMap { exists in
@@ -69,6 +70,8 @@ internal final class MultiStaticMapController: @unchecked Sendable {
                 MetricsManager.shared.recordRequest(type: "multistaticmap", style: "multi", cached: true, duration: duration)
                 return ResponseUtils.generateResponse(request: request, staticMap: multiStaticMap, path: path)
             }
+        }.always { _ in
+            MetricsManager.shared.decrementInFlight(type: "multistaticmap")
         }
     }
 

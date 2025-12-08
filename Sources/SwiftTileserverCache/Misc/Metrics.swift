@@ -61,6 +61,22 @@ public final class MetricsManager: Sendable {
         #endif
     }
     
+    // MARK: - In-Flight Request Tracking
+    
+    public func incrementInFlight(type: String) {
+        registry.makeGauge(
+            name: "tileserver_requests_in_flight",
+            labels: [("type", type)]
+        ).increment()
+    }
+    
+    public func decrementInFlight(type: String) {
+        registry.makeGauge(
+            name: "tileserver_requests_in_flight",
+            labels: [("type", type)]
+        ).decrement()
+    }
+    
     // MARK: - Request Metrics
     
     /// Record a request with type, cache status, and duration
