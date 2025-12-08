@@ -12,7 +12,7 @@ let package = Package(
         .package(url: "https://github.com/vapor/leaf", .upToNextMinor(from: "4.5.1")),
         .package(url: "https://github.com/JohnSundell/ShellOut", .upToNextMinor(from: "2.3.0")),
         .package(url: "https://github.com/weichsel/ZIPFoundation.git", .upToNextMajor(from: "0.9.20")),
-        .package(url: "https://github.com/swift-server/swift-prometheus.git", from: "2.0.0")
+        .package(url: "https://github.com/swift-server/swift-prometheus.git", from: "2.2.0")
     ],
     targets: [
         .target(

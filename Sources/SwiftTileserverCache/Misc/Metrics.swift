@@ -23,10 +23,7 @@ public final class MetricsManager: Sendable {
         // Update runtime metrics before emitting
         updateRuntimeMetrics()
         
-        var buffer = [UInt8]()
-        buffer.reserveCapacity(8192)
-        registry.emit(into: &buffer)
-        return String(decoding: buffer, as: UTF8.self)
+        return registry.emitToString()
     }
     
     // MARK: - Runtime Metrics (updated on each scrape)
