@@ -8,7 +8,7 @@ services:
     volumes:
       - ./TileServer:/data
   cache:
-    image: 0815flo/swifttileservercache:latest
+    image: ghcr.io/lenisko/swifttileservercache:latest
     container_name: tileserver-cache
     restart: unless-stopped
     tty: true
